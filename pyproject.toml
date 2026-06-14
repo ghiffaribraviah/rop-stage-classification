@@ -2,7 +2,7 @@
 name = "rop-stage-classification"
 version = "0.1.0"
 description = "ROP stage classification workflow with image enhancement and vessel-guided scenarios."
-readme = "docs/proposal/rop-stage-classification-workflow.md"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "albumentations>=1.4.0",
