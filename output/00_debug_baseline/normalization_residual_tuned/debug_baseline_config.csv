@@ -1,0 +1,2 @@
+process_max_side,vesselness_mode,clahe_clip,background_sigma,threshold_method,target_density,fov_erode_px,min_component_area,hole_size,morphology,od_suppression,od_soft_penalty,bilateral_d,bilateral_sigma_color,bilateral_sigma_space,final_skeletonize,skeleton_min_area,skeleton_dilate_iter,auto_binary_selection
+768,almeida,2.5,30.0,triangle,0.14,12,4,0,none,False,0.35,9,40.0,9.0,False,20,1,False

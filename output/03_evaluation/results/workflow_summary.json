@@ -1,0 +1,47 @@
+{
+  "zhao_root": "/home/hoohkun/Documents/Github Repo/rop-stage-classification/data/Zhao2024",
+  "agrawal_root": "/home/hoohkun/Documents/Github Repo/rop-stage-classification/data/Agrawal2021",
+  "is_kaggle": false,
+  "device": "cuda",
+  "gpu_count": 1,
+  "scenarios": [
+    "S1_raw",
+    "S2_enhanced",
+    "S3_vessel_mask",
+    "S4_vessel_guided"
+  ],
+  "class_names": [
+    "Normal",
+    "Stage1",
+    "Stage2",
+    "Stage3"
+  ],
+  "split_counts": {
+    "Normal": {
+      "test": 23,
+      "train": 189,
+      "val": 24
+    },
+    "Stage1": {
+      "test": 9,
+      "train": 75,
+      "val": 10
+    },
+    "Stage2": {
+      "test": 17,
+      "train": 132,
+      "val": 16
+    },
+    "Stage3": {
+      "test": 27,
+      "train": 208,
+      "val": 26
+    }
+  },
+  "notes": [
+    "Split is stratified by class but image-level because patient/eye identifiers are not available in local filenames.",
+    "S3 uses cleaned binary vessel masks repeated into three channels.",
+    "S4 uses cleaned binary masks converted to blurred soft guides and multiplied with enhanced RGB images.",
+    "Deterministic preprocessing is cached; random augmentation is applied during training only."
+  ]
+}

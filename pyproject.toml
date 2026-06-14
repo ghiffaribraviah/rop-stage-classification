@@ -1,0 +1,28 @@
+[project]
+name = "rop-stage-classification"
+version = "0.1.0"
+description = "ROP stage classification workflow with image enhancement and vessel-guided scenarios."
+readme = "docs/proposal/rop-stage-classification-workflow.md"
+requires-python = ">=3.10"
+dependencies = [
+    "albumentations>=1.4.0",
+    "ipykernel>=6.29.0",
+    "jupyter>=1.0.0",
+    "matplotlib>=3.8.0",
+    "numpy>=1.26.0",
+    "opencv-python>=4.9.0",
+    "pandas>=2.2.0",
+    "pillow>=10.0.0",
+    "psutil>=5.9.0",
+    "scikit-image>=0.22.0",
+    "scikit-learn>=1.4.0",
+    "scipy>=1.12.0",
+    "seaborn>=0.13.0",
+    "torch>=2.2.0",
+    "torchmetrics>=1.3.0",
+    "torchvision>=0.17.0",
+    "tqdm>=4.66.0",
+]
+
+[tool.uv]
+package = false
