@@ -1,0 +1,7 @@
+variant,train_dice,test_dice,wg,wm,sigma_set
+g40_m60_fine,0.4726,0.4739,0.4,0.6,fine
+g45_m55_thin,0.4718,0.4739,0.45,0.55,thin
+g45_m55_fine,0.4735,0.4736,0.45,0.55,fine
+g55_m45_fine,0.475,0.4732,0.55,0.45,fine
+r6_winner,0.4741,0.4726,0.5,0.5,fine
+g35_m65_fine,0.4729,0.4723,0.35,0.65,fine

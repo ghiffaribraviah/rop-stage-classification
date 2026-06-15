@@ -1,0 +1,59 @@
+Dataset: 756 labeled images
+label
+Stage3    261
+Normal    236
+Stage2    165
+Stage1     94
+  features 50/756 (57s)
+  features 100/756 (113s)
+  features 150/756 (170s)
+  features 200/756 (228s)
+  features 250/756 (285s)
+  features 300/756 (342s)
+  features 350/756 (400s)
+  features 400/756 (457s)
+  features 450/756 (513s)
+  features 500/756 (570s)
+  features 550/756 (627s)
+  features 600/756 (683s)
+  features 650/756 (738s)
+  features 700/756 (794s)
+  features 750/756 (849s)
+
+Extracted 48 features in 856s
+
+========================================================
+5-fold stratified CV (macro-F1)
+========================================================
+
+[svm_rbf] macro-F1=0.4964  acc=0.5476
+   Normal   P=0.762 R=0.775 F1=0.769
+   Stage1   P=0.282 R=0.330 F1=0.304
+   Stage2   P=0.346 R=0.339 F1=0.343
+   Stage3   P=0.590 R=0.552 F1=0.570
+
+[random_forest] macro-F1=0.5147  acc=0.5675
+   Normal   P=0.728 R=0.784 F1=0.755
+   Stage1   P=0.315 R=0.309 F1=0.312
+   Stage2   P=0.427 R=0.406 F1=0.416
+   Stage3   P=0.585 R=0.567 F1=0.576
+
+[grad_boost] macro-F1=0.4912  acc=0.5569
+   Normal   P=0.763 R=0.750 F1=0.756
+   Stage1   P=0.350 R=0.223 F1=0.273
+   Stage2   P=0.357 R=0.339 F1=0.348
+   Stage3   P=0.544 R=0.640 F1=0.588
+
+Top 12 RF feature importances:
+   tortuosity_proxy         0.0427
+   comp_size_std            0.0328
+   vessel_anisotropy        0.0325
+   int_r_std                0.0286
+   ridge_main_area          0.0283
+   ridge_main_len           0.0274
+   ridge_main_extent        0.0267
+   soft_std                 0.0266
+   comp_size_max            0.0260
+   glcm_correlation_std     0.0258
+   ridge_resp_p95           0.0247
+   vessel_density           0.0243

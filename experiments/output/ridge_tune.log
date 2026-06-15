@@ -1,0 +1,7 @@
+Tuning ridge filter on 100 Agrawal RIDGE pairs
+
+  frangi+top0.4      recall@10%=0.205 recall@16%=0.308 separation=1.25
+  frangi-only        recall@10%=0.224 recall@16%=0.333 separation=1.24
+  sato+top0.4        recall@10%=0.188 recall@16%=0.361 separation=1.42
+  meijering+top0.4   recall@10%=0.193 recall@16%=0.365 separation=1.44
+  frangi+top0.6      recall@10%=0.201 recall@16%=0.302 separation=1.25

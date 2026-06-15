@@ -1,0 +1,181 @@
+ROP Vessel Pipeline Experiments
+Agrawal root: /home/ubuntu/rop-stage-classification/data/Agrawal2021
+Output: /home/ubuntu/rop-stage-classification/experiments/output
+
+Found 100 image/mask pairs
+  RetCam: 50
+  Neo:    50
+
+Using subset: 20 images (10 RetCam + 10 Neo)
+
+======================================================================
+EXPERIMENT 1: Channel Source Comparison
+======================================================================
+    C4G4            done in 1.7s
+    C6G6            done in 1.7s
+    BH isolated     done in 1.6s
+    BHboost+G6      done in 1.6s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [1/20] RetCam 1.png — 36 metrics
+    C4G4            done in 1.7s
+    C6G6            done in 1.7s
+    BH isolated     done in 1.6s
+    BHboost+G6      done in 1.6s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [2/20] RetCam 10.png — 36 metrics
+    C4G4            done in 1.7s
+    C6G6            done in 1.6s
+    BH isolated     done in 1.6s
+    BHboost+G6      done in 1.6s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [3/20] RetCam 11.png — 36 metrics
+    C4G4            done in 1.6s
+    C6G6            done in 1.6s
+    BH isolated     done in 1.7s
+    BHboost+G6      done in 1.6s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [4/20] RetCam 12.png — 36 metrics
+    C4G4            done in 1.6s
+    C6G6            done in 1.6s
+    BH isolated     done in 1.6s
+    BHboost+G6      done in 1.6s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [5/20] RetCam 13.png — 36 metrics
+    C4G4            done in 1.7s
+    C6G6            done in 1.7s
+    BH isolated     done in 1.6s
+    BHboost+G6      done in 1.7s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [6/20] RetCam 14.png — 36 metrics
+    C4G4            done in 1.6s
+    C6G6            done in 1.6s
+    BH isolated     done in 1.6s
+    BHboost+G6      done in 1.6s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [7/20] RetCam 15.png — 36 metrics
+    C4G4            done in 1.6s
+    C6G6            done in 1.6s
+    BH isolated     done in 1.6s
+    BHboost+G6      done in 1.6s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [8/20] RetCam 16.png — 36 metrics
+    C4G4            done in 1.6s
+    C6G6            done in 1.7s
+    BH isolated     done in 1.6s
+    BHboost+G6      done in 1.6s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [9/20] RetCam 17.png — 36 metrics
+    C4G4            done in 1.6s
+    C6G6            done in 1.6s
+    BH isolated     done in 1.6s
+    BHboost+G6      done in 1.6s
+    FlatSub+G6      done in 1.6s
+    FlatDiv+G6      done in 1.6s
+  [10/20] RetCam 18.png — 36 metrics
+    C4G4            done in 3.1s
+    C6G6            done in 3.1s
+    BH isolated     done in 3.2s
+    BHboost+G6      done in 3.1s
+    FlatSub+G6      done in 3.1s
+    FlatDiv+G6      done in 3.1s
+  [11/20] Neo 1.png — 36 metrics
+    C4G4            done in 3.1s
+    C6G6            done in 3.2s
+    BH isolated     done in 3.1s
+    BHboost+G6      done in 3.0s
+    FlatSub+G6      done in 3.2s
+    FlatDiv+G6      done in 3.1s
+  [12/20] Neo 10.png — 36 metrics
+    C4G4            done in 3.1s
+    C6G6            done in 3.1s
+    BH isolated     done in 3.2s
+    BHboost+G6      done in 3.2s
+    FlatSub+G6      done in 3.1s
+    FlatDiv+G6      done in 3.1s
+  [13/20] Neo 11.png — 36 metrics
+    C4G4            done in 3.1s
+    C6G6            done in 3.1s
+    BH isolated     done in 3.1s
+    BHboost+G6      done in 3.1s
+    FlatSub+G6      done in 3.1s
+    FlatDiv+G6      done in 3.1s
+  [14/20] Neo 12.png — 36 metrics
+    C4G4            done in 3.1s
+    C6G6            done in 3.1s
+    BH isolated     done in 3.1s
+    BHboost+G6      done in 3.0s
+    FlatSub+G6      done in 3.2s
+    FlatDiv+G6      done in 3.2s
+  [15/20] Neo 13.png — 36 metrics
+    C4G4            done in 3.1s
+    C6G6            done in 3.1s
+    BH isolated     done in 3.2s
+    BHboost+G6      done in 3.1s
+    FlatSub+G6      done in 3.1s
+    FlatDiv+G6      done in 3.1s
+  [16/20] Neo 14.png — 36 metrics
+    C4G4            done in 3.1s
+    C6G6            done in 3.2s
+    BH isolated     done in 3.1s
+    BHboost+G6      done in 3.1s
+    FlatSub+G6      done in 3.1s
+    FlatDiv+G6      done in 3.1s
+  [17/20] Neo 15.png — 36 metrics
+    C4G4            done in 3.2s
+    C6G6            done in 3.2s
+    BH isolated     done in 3.1s
+    BHboost+G6      done in 3.1s
+    FlatSub+G6      done in 3.1s
+    FlatDiv+G6      done in 3.1s
+  [18/20] Neo 16.png — 36 metrics
+    C4G4            done in 3.2s
+    C6G6            done in 3.2s
+    BH isolated     done in 3.2s
+    BHboost+G6      done in 3.2s
+    FlatSub+G6      done in 3.1s
+    FlatDiv+G6      done in 3.1s
+  [19/20] Neo 17.png — 36 metrics
+    C4G4            done in 3.2s
+    C6G6            done in 3.1s
+    BH isolated     done in 3.1s
+    BHboost+G6      done in 3.0s
+    FlatSub+G6      done in 3.1s
+    FlatDiv+G6      done in 3.1s
+  [20/20] Neo 18.png — 36 metrics
+
+Saved metrics: /home/ubuntu/rop-stage-classification/experiments/output/exp1_channel_source_metrics.csv
+Saved summary: /home/ubuntu/rop-stage-classification/experiments/output/exp1_channel_source_summary.csv
+
+── Best Dice per channel source (P10 threshold) ──
+  C4G4                  Dice=0.3693
+  C6G6                  Dice=0.3674
+  BH isolated           Dice=0.1356
+  BHboost+G6            Dice=0.1160
+  FlatSub+G6            Dice=0.3791
+  FlatDiv+G6            Dice=0.3743
+
+======================================================================
+EXPERIMENT 2: C6G6 + BH Isolated Fusion
+======================================================================
+  [1/20] RetCam 1.png — 9 variants
+  [2/20] RetCam 10.png — 9 variants
+  [3/20] RetCam 11.png — 9 variants
+  [4/20] RetCam 12.png — 9 variants
+  [5/20] RetCam 13.png — 9 variants
+  [6/20] RetCam 14.png — 9 variants
+  [7/20] RetCam 15.png — 9 variants
+  [8/20] RetCam 16.png — 9 variants
+  [9/20] RetCam 17.png — 9 variants
+  [10/20] RetCam 18.png — 9 variants
+  [11/20] Neo 1.png — 9 variants
+  [12/20] Neo 10.png — 9 variants
+  [13/20] Neo 11.png — 9 variants
