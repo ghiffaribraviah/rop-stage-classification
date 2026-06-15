@@ -31,8 +31,8 @@ except ModuleNotFoundError:
         def __getattr__(self, _): return object
     nn = _Stub(); Dataset = object
 
-app = modal.App("rop-masked-cnn-cv")
-cache_vol = modal.Volume.from_name("rop-masked-cv-cache", create_if_missing=True)
+app = modal.App("rop-masked-cnn-cv-champion")
+cache_vol = modal.Volume.from_name("rop-masked-cv-champion-cache", create_if_missing=True)
 
 image = (modal.Image.debian_slim(python_version="3.12")
     .apt_install("libgl1-mesa-glx", "libglib2.0-0")
@@ -56,7 +56,20 @@ def est_fov(rgb):
     if nl > 1: m = (labels == 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))).astype(np.uint8)
     return m.astype(bool)
 
-# ── vessel softmap (Gabor pipeline, identical to rop_training.segment_vessels path) ──
+# ── vessel softmap: CHAMPION recipe (g40_m60_fine) ─────────────────────────────
+# Source of truth: experiments/vessel_champion_config.csv. The champion that won the
+# vessel-segmentation sweep (Dice 0.4739 vs 0.4469 baseline) is the fusion
+#   0.40 * gabor_tophat  +  0.60 * meijering_fine
+# where gabor_tophat is the original Gabor->median->CLAHE soft map (kept byte-identical
+# below) and meijering_fine is a Hessian ridge detector at FINE sigmas tuned for thin
+# peripheral vessels.
+#
+# NOTE ON BINARIZATION: the champion's Dice score also involved a threshold + connected-
+# component cleanup (P0.16, top-3 CC, 3x3 close). That stage exists only to emit a BINARY
+# mask for Dice scoring. Here the map feeds a CNN channel, which benefits from the
+# continuous soft signal, so we deliberately fuse and renormalize but DO NOT binarize.
+MEIJERING_FINE_SCALES = (0.8, 1.4, 2.0, 2.8, 3.6, 4.5)
+
 def gabor_resp(inv_f, fov):
     r = np.zeros(inv_f.shape, np.float32)
     for sg, lm in [(1.5, 3), (2.5, 5), (3.5, 7), (5, 10)]:
@@ -69,7 +82,8 @@ def gabor_resp(inv_f, fov):
             r = np.maximum(r, cv2.filter2D(inv_f, cv2.CV_32F, gk, borderType=cv2.BORDER_REFLECT))
     r[~fov] = 0; return norm01(r, fov)
 
-def vessel_softmap(rgb, fov):
+def gabor_tophat_softmap(rgb, fov):
+    """The original masked_cnn_cv vessel_softmap, unchanged. Champion term, weight 0.40."""
     g = rgb[:, :, 1].copy(); g[~fov] = 0
     enh = cv2.createCLAHE(clipLimit=6, tileGridSize=(16, 16)).apply(g); enh[~fov] = 0
     inv = 255 - enh; inv_f = norm01(inv.astype(np.float32), fov)
@@ -79,6 +93,23 @@ def vessel_softmap(rgb, fov):
     u8 = np.clip(soft * 255, 0, 255).astype(np.uint8); u8[~fov] = 0
     enh2 = cv2.createCLAHE(clipLimit=12, tileGridSize=(12, 12)).apply(u8); enh2[~fov] = 0
     return norm01(enh2.astype(np.float32), fov)
+
+def meijering_fine_softmap(rgb, fov):
+    """Hessian ridge response at fine sigmas (thin peripheral vessels). Champion term, weight 0.60."""
+    g = rgb[:, :, 1].copy(); g[~fov] = 0
+    enh = cv2.createCLAHE(clipLimit=6, tileGridSize=(16, 16)).apply(g); enh[~fov] = 0
+    inv_f = norm01((255 - enh).astype(np.float32), fov)
+    resp = meijering(inv_f.astype(np.float64), sigmas=list(MEIJERING_FINE_SCALES), black_ridges=False)
+    resp = np.nan_to_num(resp, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32); resp[~fov] = 0.0
+    return norm01(resp, fov)
+
+def vessel_softmap(rgb, fov):
+    """Champion fusion: 0.40*gabor_tophat + 0.60*meijering_fine, FOV-masked, renormalized."""
+    gab = gabor_tophat_softmap(rgb, fov)
+    mei = meijering_fine_softmap(rgb, fov)
+    fused = 0.40 * gab + 0.60 * mei
+    fused[~fov] = 0.0
+    return norm01(fused.astype(np.float32), fov)
 
 # ── ridge softmap (meijering + oriented tophat, weight 0.4; identical to ridge_response_map) ──
 RIDGE_SCALES = (3, 5, 7, 9, 11)
