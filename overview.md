@@ -44,13 +44,14 @@ The classical vessel pipeline is inlined directly inside
 `rop-stage-classification.ipynb`. The fixed baseline is:
 
 ```text
-vesselness_mode      = almeida
-threshold_method     = triangle
-target_density       = 0.14
+vesselness_mode      = almeida_paper
+green_channel        = CIELAB L* CLAHE -> RGB green -> 30x30 background normalization
+enhancement          = Almeida-style BSGMF -> modified top-hat -> 0.70 Frangi + 0.30 Jerman
+threshold_method     = percentile
+target_density       = 0.10
 fov_erode_px         = 12
-min_component_area   = 4
+min_component_area   = 50
 background_sigma     = 30.0
-bilateral_d          = 9
 final_skeletonize    = False
 auto_binary_selection = False
 ```
