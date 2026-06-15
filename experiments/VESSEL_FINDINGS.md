@@ -91,3 +91,86 @@ What worked / didn't (TRAIN dice):
 - tophat_thin: 0.409 — top-hat helps only with the standard scale set, not thin.
 
 Lever ranking: preprocessing (top-hat) >> scales/angles/threshold/cleanup. Next: tune top-hat blend ratio.
+
+### Round 3: top-hat blend ratio + kernel tuning (vessel_round3.py)
+Fixed downstream: P0.16 + top-3 + close 3×3. Swept the top-hat blend weight and structuring-element size.
+
+**Result: PLATEAU — no improvement over Round 2.**
+- best TEST Dice = 0.4599 (≈ Round 2's 0.4600, within noise).
+- blend weight 0.5 is robust: 0.4/0.5/0.6 all land within ±0.001. The blend is insensitive — good for stability, but no lever here.
+- top-hat kernel size: neutral across tested radii.
+
+Conclusion: preprocessing is now saturated. Threshold, cleanup, AND preprocessing are all plateaued at TEST≈0.460. The remaining lever is the SOFT-MAP BUILDER itself (the detector), not its inputs/outputs.
+
+### Round 4: change the soft-map builder — Hessian ridge fusion (vessel_round4.py)
+New lever: multiscale Hessian ridge filters (Frangi / Sato / Meijering) on CLAHE-enhanced
+inverted green. Tubularness via local Hessian eigenstructure — fundamentally different from
+oriented Gabor energy. Tested (a) pure ridge maps and (b) ridge BLENDED with the round-2 Gabor+tophat soft.
+
+**NEW BEST — BIG WIN:**
+- `blend_sato_50`: 0.5 × Sato ridge + 0.5 × gabor_tophat soft, then P0.16 + top-3 + close 3×3.
+- **TEST Dice = 0.4655** (vs Round 2's 0.4600) → **+0.0055**, generalizes (train≈test).
+
+What worked / didn't:
+- **Sato + Gabor blend beats Frangi + Gabor.** Sato's neuriteness normalization complements Gabor better than Frangi's vesselness.
+- Pure ridge filters alone (no Gabor): worse than the blend — Gabor still carries the thick-vessel signal.
+- 50/50 blend is the sweet spot among coarse sweeps.
+
+### Round 5: refine the Sato+Gabor blend (vessel_round5.py)
+Levers at locked downstream: (a) Sato sigma-range (finer/denser/extended), (b) beta fine grid 0.40–0.60, (c) FOV percentile clip-normalize on the heavy-tailed Sato map before blending.
+
+**Small win:**
+- `fine_050`: 0.5 × Sato(fine sigmas) + 0.5 × gabor_tophat → **TEST Dice = 0.4667** (+0.0012 over Round 4).
+- Finer Sato sigmas marginally help; beta stays at 0.50; percentile clip ~neutral.
+
+### Round 6: 3-way detector fusion (vessel_round6.py)
+Add Meijering (neuriteness, different Hessian eigenvalue normalization than Sato) as a 3rd channel:
+blend = wg·gabor_tophat + ws·sato_fine + wm·meijering_fine (weights sum to 1).
+
+**Finding: Meijering REPLACES Sato — it does not add to it.**
+- Best 3-way configs collapse toward Gabor+Meijering (ws→0). Sato and Meijering are redundant; Meijering is the stronger partner for Gabor.
+- This motivated Round 7: drop Sato, tune a clean Gabor + Meijering 2-way fusion.
+
+### Round 7: Gabor + Meijering 2-way fusion — CHAMPION (vessel_round7.py)
+blend = wg·gabor_tophat + wm·meijering(sigma_set). Swept weights and Meijering sigma sets
+(fine / thin / thick). Locked downstream: P0.16 (FOV-eroded) + top-3 CC + close 3×3.
+
+**NEW CHAMPION — overall best:**
+- `g40_m60_fine`: **0.40 × Gabor + 0.60 × Meijering(fine)** → **TEST Dice = 0.4739**
+  (+0.0072 over Round 5, **+6.0% over the 0.4469 baseline**). TRAIN≈TEST, clean generalization.
+- `g45_m55_thin` ties at **0.4739** (0.45 Gabor + 0.55 Meijering, thin sigmas) — also generalizes cleanly.
+- Meijering-dominant blends (wm≥0.55) win: neuriteness recovers thin vessels Gabor misses, Gabor anchors the thick trunks.
+
+**Champion recipe (locked):**
+1. Green channel → CLAHE clip 6.0, tile 16×16
+2. invert → normalize → Gabor filter bank (sigmas=[1.5,2.5,3.5,5.0], lambdas=[3,5,7,10], 15° angles), with top-hat blend preproc
+3. median blur 7 → renormalize → CLAHE clip 12.0, tile 12×12  → gabor_tophat soft
+4. Meijering neuriteness, fine sigmas=(0.8,1.4,2.0,2.8,3.6,4.5)
+5. fuse: 0.40·gabor_tophat + 0.60·meijering
+6. threshold: percentile P0.16 with FOV erosion
+7. cleanup: keep top-3 CC + morphological close 3×3
+
+### Round 8: push past the champion (vessel_round8.py) — DEAD END
+Attempted further gains beyond 0.4739 (extra detector channels / weight & sigma micro-tuning).
+
+**Result: REGRESSION. No config beat Round 7.** Round 8 reverted (uncommitted edit discarded).
+Research has converged — **Round 7 `g40_m60_fine` (TEST 0.4739) is the validated peak.**
+
+---
+
+## Final summary
+
+| Round | Lever | Best TEST Dice | Δ vs baseline |
+|---|---|---|---|
+| baseline | overlay_results (Gabor + 2×CLAHE + P0.16 + top2) | 0.4469 | — |
+| 1 | threshold / cleanup | 0.4505 | +0.0036 |
+| 2 | top-hat preprocessing before Gabor | 0.4600 | +0.0131 |
+| 3 | top-hat blend ratio | 0.4599 | (plateau) |
+| 4 | Sato + Gabor fusion | 0.4655 | +0.0186 |
+| 5 | fine Sato sigmas, beta | 0.4667 | +0.0198 |
+| 6 | 3-way (Meijering replaces Sato) | — | (redundancy found) |
+| **7** | **Gabor + Meijering fusion** | **0.4739** | **+0.0270 (+6.0%)** |
+| 8 | push beyond | (regression) | dead end |
+
+**CHAMPION: `vessel_round7.py` → `g40_m60_fine` (also `g45_m55_thin`), TEST Dice = 0.4739.**
+Lever ranking overall: detector fusion (Gabor+Meijering) > top-hat preprocessing > Sato blend > threshold/cleanup.
