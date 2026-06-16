@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import heapq
 from pathlib import Path
 
 import cv2
 import numpy as np
+from skimage.filters import frangi
+from skimage.morphology import skeletonize
 
 from almeida_workflow_visualization import (
     DEFAULT_OUTPUT,
@@ -30,16 +33,35 @@ from threshold_workflow_visualization import (
 DEFAULT_GABOR_OUTPUT = DEFAULT_OUTPUT.with_name("debug_gabor_clahe_p10_workflow_15_samples.jpg")
 
 
-def light_fov_border_band(fov: np.ndarray, radius: int | None = None) -> np.ndarray:
+@dataclass(frozen=True)
+class GaborClaheConfig:
+    target_density: float = 0.09
+    main_low_mult: float = 1.28
+    main_high_mult: float = 0.50
+    residual_enabled: bool = True
+    residual_low_mult: float = 1.22
+    recovery_axis_ratio: float = 2.3
+    recovery_skeleton_length: int | None = None
+    recovery_branch_density: float = 0.12
+
+
+def fov_outline_subtraction_mask(fov: np.ndarray) -> np.ndarray:
     if not np.any(fov):
         return np.zeros(fov.shape, dtype=bool)
+
     fov = fov.astype(bool)
     min_side = max(1, min(fov.shape))
-    if radius is None:
-        radius = int(round(min_side * 0.030))
-        radius = int(np.clip(radius, 8, 24))
-    distance = cv2.distanceTransform(fov.astype(np.uint8), cv2.DIST_L2, 5)
-    return (distance <= float(max(1, radius))) & fov
+    thickness = int(np.clip(round(min_side * 0.034), 12, 26))
+    outline = np.zeros(fov.shape, dtype=np.uint8)
+    contours, _ = cv2.findContours(
+        fov.astype(np.uint8),
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    if not contours:
+        return np.zeros(fov.shape, dtype=bool)
+    cv2.drawContours(outline, contours, contourIdx=-1, color=1, thickness=thickness, lineType=cv2.LINE_AA)
+    return outline.astype(bool) & fov
 
 
 def clahe_channel(channel: np.ndarray, clip_limit: float, tile_grid_size: tuple[int, int]) -> np.ndarray:
@@ -152,6 +174,48 @@ def density_threshold(response: np.ndarray, fov: np.ndarray, target_density: flo
     return ((response >= threshold) & fov).astype(bool)
 
 
+def hysteresis_density_threshold(
+    response: np.ndarray,
+    fov: np.ndarray,
+    target_density: float,
+    low_mult: float = 1.28,
+    high_mult: float = 0.50,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    values = response[fov]
+    if values.size == 0:
+        empty = np.zeros(response.shape, dtype=bool)
+        return empty, empty, empty
+
+    low_density = float(np.clip(target_density * float(low_mult), 0.015, 0.20))
+    high_density = float(np.clip(target_density * float(high_mult), 0.008, low_density * 0.85))
+    low_threshold = float(np.percentile(values, 100.0 * (1.0 - low_density)))
+    high_threshold = float(np.percentile(values, 100.0 * (1.0 - high_density)))
+
+    low_mask = ((response >= low_threshold) & fov).astype(bool)
+    high_mask = ((response >= high_threshold) & fov).astype(bool)
+    if not np.any(low_mask) or not np.any(high_mask):
+        return high_mask, high_mask, low_mask
+
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(low_mask.astype(np.uint8), 8)
+    if n_labels <= 1:
+        return low_mask, high_mask, low_mask
+
+    min_side = max(1, min(response.shape))
+    min_area = int(np.clip(round(min_side * min_side * 0.000035), 8, 28))
+    seed_labels = set(np.unique(labels[high_mask]).tolist())
+    seed_labels.discard(0)
+    keep_labels = {
+        label
+        for label in seed_labels
+        if int(stats[label, cv2.CC_STAT_AREA]) >= min_area
+    }
+    if not keep_labels:
+        return high_mask, high_mask, low_mask
+
+    mask = np.isin(labels, list(keep_labels)) & fov
+    return mask.astype(bool), high_mask, low_mask
+
+
 def keep_largest_components(mask: np.ndarray, count: int = 2) -> np.ndarray:
     n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), 8)
     if n_labels <= 1:
@@ -159,6 +223,77 @@ def keep_largest_components(mask: np.ndarray, count: int = 2) -> np.ndarray:
     areas = [(int(stats[label, cv2.CC_STAT_AREA]), label) for label in range(1, n_labels)]
     keep_labels = {label for _, label in sorted(areas, reverse=True)[: int(count)]}
     return np.isin(labels, list(keep_labels))
+
+
+def component_axis_ratio(component: np.ndarray) -> float:
+    ys, xs = np.nonzero(component)
+    if len(xs) < 3:
+        return 1.0
+    coords = np.column_stack((xs.astype(np.float32), ys.astype(np.float32)))
+    coords -= coords.mean(axis=0, keepdims=True)
+    covariance = np.cov(coords, rowvar=False)
+    eigenvalues = np.linalg.eigvalsh(covariance)
+    minor = max(float(eigenvalues[0]), 1e-3)
+    major = max(float(eigenvalues[-1]), minor)
+    return float(np.sqrt(major / minor))
+
+
+def recover_vessel_like_components(
+    candidates: np.ndarray,
+    response: np.ndarray,
+    fov: np.ndarray,
+    axis_ratio_min: float = 2.3,
+    skeleton_length_min: int | None = None,
+    branch_density_max: float = 0.12,
+) -> np.ndarray:
+    candidates = candidates.astype(bool) & fov
+    if not np.any(candidates):
+        return np.zeros(candidates.shape, dtype=bool)
+
+    values = response[fov]
+    if values.size == 0:
+        return np.zeros(candidates.shape, dtype=bool)
+    p45 = float(np.percentile(values, 45.0))
+    p82 = float(np.percentile(values, 82.0))
+    p93 = float(np.percentile(values, 93.0))
+
+    min_side = max(1, min(candidates.shape))
+    min_area = int(np.clip(round(min_side * min_side * 0.000025), 8, 24))
+    if skeleton_length_min is None:
+        skeleton_length_min = int(np.clip(round(min_side * 0.026), 14, 28))
+    neighbor_kernel = np.ones((3, 3), dtype=np.uint8)
+
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(candidates.astype(np.uint8), 8)
+    recovered = np.zeros(candidates.shape, dtype=bool)
+    for label in range(1, n_labels):
+        component = labels == label
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area < min_area:
+            continue
+        component_values = response[component]
+        if component_values.size == 0:
+            continue
+        mean_response = float(component_values.mean())
+        max_response = float(component_values.max())
+        axis_ratio = component_axis_ratio(component)
+        if axis_ratio < float(axis_ratio_min):
+            continue
+
+        skeleton = skeletonize(component)
+        skeleton_length = int(skeleton.sum())
+        if skeleton_length < int(skeleton_length_min):
+            continue
+        neighbor_count = cv2.filter2D(skeleton.astype(np.uint8), -1, neighbor_kernel, borderType=cv2.BORDER_CONSTANT)
+        branch_points = int(np.count_nonzero(skeleton & (neighbor_count >= 5)))
+        branch_density = branch_points / float(max(1, skeleton_length))
+        if branch_density > float(branch_density_max):
+            continue
+
+        strong_enough = (mean_response >= p45 and max_response >= p82) or max_response >= p93
+        if strong_enough:
+            recovered |= component
+
+    return recovered & fov
 
 
 def astar_path(
@@ -300,14 +435,204 @@ def reconnect_density_mask(
     return connected & fov, accepted_paths & fov
 
 
+def line_bridge_mask(
+    shape: tuple[int, int],
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    thickness: int = 2,
+) -> np.ndarray:
+    bridge = np.zeros(shape, dtype=np.uint8)
+    cv2.line(
+        bridge,
+        (int(start[1]), int(start[0])),
+        (int(goal[1]), int(goal[0])),
+        1,
+        max(1, int(thickness)),
+    )
+    return bridge.astype(bool)
+
+
+def bridge_density_mask(
+    mask: np.ndarray,
+    soft_response: np.ndarray,
+    fov: np.ndarray,
+    forbidden: np.ndarray | None = None,
+    max_gap: int | None = None,
+    max_pairs: int = 180,
+    response_floor_pct: float = 28.0,
+    high_response_pct: float = 50.0,
+    min_high_fraction: float = 0.16,
+) -> tuple[np.ndarray, np.ndarray]:
+    endpoints = endpoint_connection_candidates(mask)
+    if len(endpoints) < 2:
+        empty = np.zeros(mask.shape, dtype=bool)
+        return mask.astype(bool) & fov, empty
+
+    values = soft_response[fov]
+    if values.size == 0:
+        empty = np.zeros(mask.shape, dtype=bool)
+        return mask.astype(bool) & fov, empty
+
+    min_side = max(1, min(mask.shape))
+    if max_gap is None:
+        max_gap = int(np.clip(round(min_side * 0.090), 40, 70))
+    response_floor = max(0.03, float(np.percentile(values, float(response_floor_pct))))
+    high_response = max(response_floor, float(np.percentile(values, float(high_response_pct))))
+    forbidden_mask = np.zeros(mask.shape, dtype=bool) if forbidden is None else forbidden.astype(bool)
+    corridor_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+
+    pairs: list[tuple[float, dict[str, object], dict[str, object], np.ndarray]] = []
+    for i, first in enumerate(endpoints):
+        y0, x0 = int(first["y"]), int(first["x"])
+        dy0, dx0 = first["direction"]  # type: ignore[misc]
+        for second in endpoints[i + 1 :]:
+            if int(first["label"]) == int(second["label"]):
+                continue
+            y1, x1 = int(second["y"]), int(second["x"])
+            gap = float(np.hypot(y1 - y0, x1 - x0))
+            if gap < 3.0 or gap > float(max_gap):
+                continue
+
+            dy1, dx1 = second["direction"]  # type: ignore[misc]
+            vec_y = (y1 - y0) / gap
+            vec_x = (x1 - x0) / gap
+            align_first = dy0 * vec_y + dx0 * vec_x
+            align_second = dy1 * (-vec_y) + dx1 * (-vec_x)
+            if align_first < 0.05 or align_second < -0.05:
+                continue
+
+            bridge = line_bridge_mask(mask.shape, (y0, x0), (y1, x1), thickness=2) & fov
+            if np.any(bridge & forbidden_mask):
+                continue
+
+            bridge_corridor = cv2.dilate(bridge.astype(np.uint8), corridor_kernel, iterations=1).astype(bool) & fov
+            if np.any(bridge_corridor & forbidden_mask):
+                continue
+
+            gap_pixels = bridge_corridor & ~mask.astype(bool)
+            if not np.any(gap_pixels):
+                continue
+            response_values = soft_response[gap_pixels]
+            response_mean = float(response_values.mean())
+            high_fraction = float(np.mean(response_values >= high_response))
+            if response_mean < response_floor and high_fraction < float(min_high_fraction):
+                continue
+
+            score = gap - 6.0 * min(float(align_first), float(align_second)) - 3.0 * response_mean
+            pairs.append((score, first, second, bridge))
+
+    connected = mask.astype(bool).copy() & fov
+    bridge_paths = np.zeros(mask.shape, dtype=bool)
+    used_endpoints: set[int] = set()
+    for _, first, second, bridge in sorted(pairs, key=lambda item: item[0])[: int(max_pairs)]:
+        first_index = int(first["index"])
+        second_index = int(second["index"])
+        if first_index in used_endpoints or second_index in used_endpoints:
+            continue
+        bridge_paths |= bridge
+        connected |= bridge
+        used_endpoints.add(first_index)
+        used_endpoints.add(second_index)
+
+    return connected & fov, bridge_paths & fov
+
+
+def segment_soft_response(
+    soft_response: np.ndarray,
+    valid_fov: np.ndarray,
+    fov_outline_subtraction: np.ndarray,
+    config: GaborClaheConfig,
+) -> dict[str, np.ndarray]:
+    valid_fov = valid_fov.astype(bool)
+    fov_outline_subtraction = fov_outline_subtraction.astype(bool) & valid_fov
+    target_density = float(config.target_density)
+
+    raw_mask, high_seed_mask, low_support_mask = hysteresis_density_threshold(
+        soft_response,
+        valid_fov,
+        target_density=target_density,
+        low_mult=config.main_low_mult,
+        high_mult=config.main_high_mult,
+    )
+    raw_mask &= ~fov_outline_subtraction
+    bridge_paths = np.zeros(raw_mask.shape, dtype=bool)
+    bridge_display = bridge_paths
+    reconnected = raw_mask.astype(bool) & valid_fov
+    first_largest = keep_largest_components(reconnected, count=2) & valid_fov
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    first_mask = cv2.morphologyEx(first_largest.astype(np.uint8), cv2.MORPH_CLOSE, close_kernel, iterations=1).astype(bool)
+    first_mask &= valid_fov
+    first_mask &= ~fov_outline_subtraction
+
+    if config.residual_enabled:
+        residual_block = cv2.dilate(
+            first_mask.astype(np.uint8),
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+            iterations=1,
+        ).astype(bool)
+        residual_fov = valid_fov & ~residual_block & ~fov_outline_subtraction
+        residual_soft = soft_response.copy()
+        residual_soft[~residual_fov] = 0
+        residual_soft = normalize01(residual_soft, residual_fov)
+        residual_candidates, _, _ = hysteresis_density_threshold(
+            residual_soft,
+            residual_fov,
+            target_density=target_density * float(config.residual_low_mult),
+            low_mult=config.main_low_mult,
+            high_mult=config.main_high_mult,
+        )
+        residual_candidates &= residual_fov
+        recovered_vessels = recover_vessel_like_components(
+            residual_candidates,
+            residual_soft,
+            residual_fov,
+            axis_ratio_min=config.recovery_axis_ratio,
+            skeleton_length_min=config.recovery_skeleton_length,
+            branch_density_max=config.recovery_branch_density,
+        )
+    else:
+        residual_soft = np.zeros(raw_mask.shape, dtype=np.float32)
+        residual_candidates = np.zeros(raw_mask.shape, dtype=bool)
+        recovered_vessels = np.zeros(raw_mask.shape, dtype=bool)
+
+    threshold2_largest = keep_largest_components(recovered_vessels, count=2) & valid_fov & ~fov_outline_subtraction
+    merged_mask = (first_mask | threshold2_largest) & valid_fov & ~fov_outline_subtraction
+    final_candidates = merged_mask
+    mask_final = cv2.morphologyEx(final_candidates.astype(np.uint8), cv2.MORPH_CLOSE, close_kernel, iterations=1).astype(bool)
+    mask_final &= valid_fov
+    mask_final &= ~fov_outline_subtraction
+
+    return {
+        "high_seed_mask": high_seed_mask,
+        "low_support_mask": low_support_mask,
+        "raw_mask": raw_mask,
+        "first_largest2": first_largest,
+        "threshold1_final": first_mask,
+        "residual_soft": residual_soft,
+        "residual_candidates": residual_candidates,
+        "recovered_vessels": recovered_vessels,
+        "threshold2_largest2": threshold2_largest,
+        "merged_mask": merged_mask,
+        "connection_paths": bridge_paths,
+        "connection_paths_display": bridge_display,
+        "reconnected": reconnected,
+        "largest2": final_candidates,
+        "mask_final": mask_final,
+    }
+
+
 def gabor_clahe_maps(
     rgb: np.ndarray,
     fov: np.ndarray,
-    target_density: float = 0.16,
+    target_density: float = 0.09,
+    config: GaborClaheConfig | None = None,
 ) -> dict[str, np.ndarray]:
+    if config is None:
+        config = GaborClaheConfig(target_density=target_density)
+
     object_fov = fov.astype(bool)
-    outer_circle = light_fov_border_band(object_fov)
-    valid_fov = object_fov & ~outer_circle
+    valid_fov = object_fov
+    fov_outline_subtraction = fov_outline_subtraction_mask(object_fov)
 
     green = rgb[:, :, 1].copy()
     green[~object_fov] = 0
@@ -329,6 +654,18 @@ def gabor_clahe_maps(
     gabor_norm = normalize01(gabor, valid_fov)
     gabor_norm[~valid_fov] = 0
 
+    frangi_map = normalize01(
+        frangi(
+            inverted.astype(np.float32) / 255.0,
+            sigmas=(1, 3, 5, 7),
+            alpha=0.5,
+            beta=15.0,
+            black_ridges=False,
+        ),
+        valid_fov,
+    )
+    frangi_map[~valid_fov] = 0
+
     median = cv2.medianBlur(uint8_image(gabor_norm), 7)
     median[~valid_fov] = 0
 
@@ -338,18 +675,15 @@ def gabor_clahe_maps(
     median_norm = normalize01(median.astype(np.float32), valid_fov)
     sharpened = normalize01(0.65 * median_norm + 0.35 * clahe2_norm, valid_fov)
     sharpened[~valid_fov] = 0
+    sharpened[fov_outline_subtraction] = 0
 
-    raw_mask = density_threshold(sharpened, valid_fov, target_density=target_density)
-    reconnected, astar_paths = reconnect_density_mask(raw_mask, sharpened, valid_fov)
-    largest = keep_largest_components(reconnected, count=2) & valid_fov
-    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    mask_final = cv2.morphologyEx(largest.astype(np.uint8), cv2.MORPH_CLOSE, close_kernel, iterations=1).astype(bool)
-    mask_final &= valid_fov
+    segmentation = segment_soft_response(sharpened, valid_fov, fov_outline_subtraction, config)
 
-    return {
+    maps = {
         "preprocessing_fov": object_fov,
         "processing_fov": valid_fov,
-        "border_exclusion": outer_circle,
+        "border_exclusion": np.zeros(object_fov.shape, dtype=bool),
+        "final_subtraction": fov_outline_subtraction,
         "green": green,
         "green_filled": green_filter,
         "green_boosted": boosted_green,
@@ -359,15 +693,13 @@ def gabor_clahe_maps(
         "inverted": inverted_display,
         "gabor_response": gabor,
         "gabor_norm": gabor_norm,
+        "frangi": frangi_map,
         "median7": median,
         "clahe2": clahe2,
         "soft_response": sharpened,
-        "raw_mask": raw_mask,
-        "astar_paths": astar_paths,
-        "reconnected": reconnected,
-        "largest2": largest,
-        "mask_final": mask_final,
     }
+    maps.update(segmentation)
+    return maps
 
 
 def workflow_tiles(
@@ -375,11 +707,11 @@ def workflow_tiles(
     fov: np.ndarray,
     gt: np.ndarray,
     target_density: float,
+    config: GaborClaheConfig | None = None,
 ) -> list[tuple[str, np.ndarray]]:
-    maps = gabor_clahe_maps(rgb, fov, target_density=target_density)
+    maps = gabor_clahe_maps(rgb, fov, target_density=target_density, config=config)
     valid_fov = maps["processing_fov"]
     mask_final = maps["mask_final"]
-    empty_paths = np.zeros(mask_final.shape, dtype=bool)
     return [
         ("RGB", rgb),
         ("FOV / valid", fov_valid_overlay(rgb, fov, valid_fov, maps["preprocessing_fov"], maps["border_exclusion"])),
@@ -393,15 +725,22 @@ def workflow_tiles(
         ("Inverted", maps["inverted"]),
         ("Gabor max", maps["gabor_response"]),
         ("Gabor norm", maps["gabor_norm"]),
+        ("Frangi", maps["frangi"]),
         ("Median 7", maps["median7"]),
         ("CLAHE 12 12x12", maps["clahe2"]),
         ("Soft response", maps["soft_response"]),
-        ("Density mask", maps["raw_mask"]),
-        ("A* paths", maps["astar_paths"]),
-        ("Reconnected", maps["reconnected"]),
-        ("2 largest CC", maps["largest2"]),
+        ("Hyst mask", maps["raw_mask"]),
+        ("No connection", maps["reconnected"]),
+        ("Initial 2 CC", maps["first_largest2"]),
+        ("T1 final", maps["threshold1_final"]),
+        ("Residual soft", maps["residual_soft"]),
+        ("Residual cand", maps["residual_candidates"]),
+        ("Recovered", maps["recovered_vessels"]),
+        ("T2 2 CC", maps["threshold2_largest2"]),
+        ("T1+T2 union", maps["merged_mask"]),
+        ("Final cand", maps["largest2"]),
         ("mask_final", mask_final),
-        ("Overlay", overlay_final(rgb, mask_final, empty_paths, valid_fov)),
+        ("Overlay", overlay_final(rgb, mask_final, maps["connection_paths_display"], valid_fov)),
     ]
 
 
@@ -411,6 +750,7 @@ def build_sheet(
     tile_size: int,
     max_side: int,
     target_density: float,
+    config: GaborClaheConfig | None = None,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sheet_rows = []
@@ -419,7 +759,7 @@ def build_sheet(
         fov = estimate_fov_mask(rgb)
         gt = read_binary_mask(mask_path, fov.shape)
         tiles = [(f"{index}. {name}", rgb)]
-        tiles.extend(workflow_tiles(rgb, fov, gt, target_density=target_density)[1:])
+        tiles.extend(workflow_tiles(rgb, fov, gt, target_density=target_density, config=config)[1:])
         row_tiles = [add_label(image, label, tile_size) for label, image in tiles]
         sheet_rows.append(np.concatenate(row_tiles, axis=1))
     sheet = np.concatenate(sheet_rows, axis=0)
@@ -428,11 +768,11 @@ def build_sheet(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Visualize Gabor + CLAHE + density-threshold vessel workflow.")
+    parser = argparse.ArgumentParser(description="Visualize Gabor + CLAHE + hysteresis-threshold vessel workflow.")
     parser.add_argument("--output", type=Path, default=DEFAULT_GABOR_OUTPUT)
     parser.add_argument("--tile-size", type=int, default=150)
     parser.add_argument("--max-side", type=int, default=768)
-    parser.add_argument("--target-density", type=float, default=0.16)
+    parser.add_argument("--target-density", type=float, default=0.09)
     parser.add_argument("--retcam-count", type=int, default=5)
     parser.add_argument("--neo-count", type=int, default=5)
     parser.add_argument("--zhao-count", type=int, default=5)

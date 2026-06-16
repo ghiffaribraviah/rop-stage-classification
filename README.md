@@ -60,7 +60,7 @@ The work is organized into these phases:
 
 ## Experimental Scenarios
 
-The project compares four scenarios:
+The project compares five scenarios:
 
 | Scenario | Input | Purpose |
 |---|---|---|
@@ -68,8 +68,9 @@ The project compares four scenarios:
 | `S2_enhanced` | Enhanced RGB image | Tests whether contrast and illumination correction improve classification |
 | `S3_vessel_mask` | Vessel mask only | Tests whether vessel structure alone is useful for staging |
 | `S4_vessel_guided` | Enhanced image guided by vessel information | Tests whether emphasizing vessels helps while preserving retinal context |
+| `S5_masked_cnn_input` | Three-channel masked-CNN input: P10 soft response, P10 final mask, masked enhanced-green channel | Optional copied masked TinyResNetV2 experiment while preserving this repo's preprocessing |
 
-All four scenarios use the same dataset split.
+All scenarios use the same dataset split.
 
 ## Data Used
 
