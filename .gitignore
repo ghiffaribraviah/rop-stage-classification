@@ -6,4 +6,9 @@ __pycache__/
 .DS_Store
 Thumbs.db
 output/.matplotlib/
+output/01_preprocessing_cache/processed/
+output/01_preprocessing_cache/splits/zhao_split_with_cache_paths.csv
 rop-datasets.zip
+*.tar.gz
+runpod
+runpod.pub
