@@ -1,6 +1,0 @@
-variant,train_dice,test_dice
-blend_sato_50,0.4705,0.4655
-blend_sato_30,0.4705,0.4611
-blend_frangi_50,0.4673,0.46
-blend_frangi_30,0.4694,0.4589
-blend_sato_70,0.4618,0.4563

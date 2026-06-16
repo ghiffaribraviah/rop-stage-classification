@@ -1,12 +1,22 @@
 # ROP Stage Classification
 
-This project studies Retinopathy of Prematurity (ROP) stage classification from retinal fundus images. The goal is to build and evaluate an image-analysis workflow that can classify images into ROP stages while also examining whether image enhancement and vessel-focused processing help the classification task.
+Retinopathy of Prematurity (ROP) stage classification on retinal fundus images,
+combining a classical-ML baseline with a from-scratch deep-learning champion. The
+project also studies whether vessel- and ridge-focused preprocessing improves
+staging performance.
 
-The project is developed as a notebook-first research workflow in [`rop-stage-classification.ipynb`](rop-stage-classification.ipynb). Supporting proposal material and references are stored under [`docs/`](docs).
+## Quick Start
 
-## What We Are Doing
+**Data:** Zhao2024 (3 ROP stages) + Agrawal2021 (5 ROP stages, with vessel masks).
 
-ROP is a retinal disease affecting premature infants. Clinical staging depends on visual signs such as vascular changes, demarcation lines, ridges, and other retinal structures. This project focuses on a four-class image classification task:
+**Champion result:** **0.7853 macro-F1** — 5-fold group-aware cross-validation.
+- Model: Masked CNN (TinyResNetV2) trained from scratch.
+- Preprocessing: vessel + ridge softmaps (Gabor + Meijering fusion).
+- Classical baseline: **0.5147 macro-F1** (48 handcrafted features + classical ML).
+
+The full source of truth for results is [`results/FINAL_RESULT.md`](results/FINAL_RESULT.md).
+
+## Classes
 
 - `Normal`
 - `Stage1`
@@ -98,17 +108,62 @@ The current split is image-level because patient or eye identifiers are not avai
 ## Repository Structure
 
 ```text
-.
-|-- rop-stage-classification.ipynb        # Main project notebook
-|-- overview.md                           # Short technical workflow note
-|-- pyproject.toml                        # Python dependency metadata
-|-- uv.lock                               # Locked dependency versions
-|-- data/                                 # Local datasets
-|-- docs/                                 # Proposal, references, and assignment material
-`-- output/                               # Generated debug, preprocessing, training, and evaluation outputs
+rop-stage-classification/
+├── README.md                       # This file
+├── overview.md                     # High-level technical workflow note
+├── rop-stage-classification.ipynb  # Original notebook-first exploration
+├── pyproject.toml / uv.lock        # uv-managed dependencies
+│
+├── data/                           # Local datasets (Git LFS)
+│   ├── Zhao2024/                   # 3 ROP stages
+│   └── Agrawal2021/                # 5 ROP stages + vessel masks
+│
+├── experiments/                    # Keeper scripts (see experiments/README.md)
+│   ├── cnn/                        # Masked-CNN classification (Modal)
+│   ├── vessel/                     # Vessel-segmentation pipeline + champion recipe
+│   └── classical/                  # Classical ML baselines
+│
+├── results/                        # Result write-ups (source of truth)
+│   ├── FINAL_RESULT.md             # End-to-end narrative, raw RGB → champion
+│   ├── RESULTS.md                  # ROP staging results & findings
+│   ├── CHAMPION_RESULTS.md         # Masked-CNN champion head-to-head
+│   ├── V2_RESULTS.md               # Masked-CNN v2 (5-class, toward 0.80)
+│   └── V3_RESULTS.md               # Masked-CNN v3 (ordinal-aware)
+│
+├── scripts/                        # Standalone visualization / diagnostic scripts
+├── docs/                           # Proposal, references, assignment material, LaTeX template
+└── trashbin/                       # Quarantined dead-end work (git-ignored, kept on disk)
 ```
 
-Large image files, model checkpoints, arrays, and archives are configured for Git LFS through [`.gitattributes`](.gitattributes).
+Large image files, model checkpoints, arrays, and archives are tracked with Git
+LFS through [`.gitattributes`](.gitattributes).
+
+## Datasets
+
+```text
+data/
+  Zhao2024/        # main 3-stage classification dataset
+  Agrawal2021/     # 5-stage staging + vessel masks (HVDROPDB-BV, HVDROPDB-RIDGE)
+```
+
+- **Zhao2024** — primary stage-classification dataset.
+- **Agrawal2021** — 5-stage staging plus vessel/ridge masks, used both for the
+  champion CNN and for vessel-segmentation evaluation.
+
+The cross-validation is **group-aware** to avoid leaking related images across
+folds. Reported performance should still be read as research-grade, not as a
+validated clinical generalization estimate.
+
+## Method Overview
+
+1. **Classical baseline** — 48 handcrafted features (color, texture, vessel,
+   ridge descriptors) fed to classical ML. Establishes the 0.5147 macro-F1 floor.
+2. **Vessel segmentation** — a classical pipeline producing vesselness softmaps,
+   tuned over multiple rounds to a champion recipe (Gabor + Meijering fusion).
+   See [`experiments/vessel/VESSEL_FINDINGS.md`](experiments/vessel/VESSEL_FINDINGS.md).
+3. **Masked CNN** — a small from-scratch residual CNN (TinyResNetV2) that consumes
+   the RGB image plus vessel/ridge softmap channels, cross-validated 5-fold under
+   the classical baseline protocol. Reaches the 0.7853 macro-F1 champion result.
 
 ## How To Run
 
@@ -118,45 +173,47 @@ Install dependencies with `uv`:
 uv sync
 ```
 
-Start Jupyter from the project root:
+### CNN classification (Modal)
+
+The CNN scripts use Modal with **relative** paths, so they must be invoked **from
+the repo root**:
+
+```bash
+modal run experiments/cnn/masked_cnn_cv_v2.py
+```
+
+### Vessel & classical scripts
+
+Vessel and classical scripts are self-contained (they resolve their own paths)
+and run from any working directory:
+
+```bash
+uv run python experiments/vessel/vessel_round7.py
+uv run python experiments/classical/rop_classical.py
+```
+
+See [`experiments/README.md`](experiments/README.md) for the per-script index.
+
+### Notebook
+
+The original exploration lives in
+[`rop-stage-classification.ipynb`](rop-stage-classification.ipynb):
 
 ```bash
 uv run jupyter notebook
 ```
 
-Open:
-
-```text
-rop-stage-classification.ipynb
-```
-
-The notebook is designed to run locally and can also adapt to Kaggle-style paths.
-
-## Outputs
-
-The project writes generated artifacts under `output/`:
-
-```text
-output/
-  00_debug_baseline/        # Vessel-processing debug visualizations
-  01_preprocessing_cache/   # Cached scenario images and dataset split
-  02_training_runs/         # Model checkpoints
-  03_evaluation/            # Metrics, reports, and workflow summaries
-  04_figures/               # Plots for reports and presentations
-```
-
-These outputs support reproducibility and reporting, but the main source of the project workflow is the notebook.
-
 ## References
 
-The project uses papers stored in [`docs/references`](docs/references), including:
+Papers are stored under [`docs/references`](docs/references), including:
 
-- Zhao2024 for the main ROP classification dataset.
-- Rahim2024 for ROP image enhancement ideas.
-- Almeida2024 for vessel enhancement and segmentation methods.
-- Agrawal2021 for vessel segmentation reference data.
-- Vahidmoghadam2026 for combined image and vessel-mask scenario inspiration.
+- **Zhao2024** — main ROP classification dataset.
+- **Agrawal2021** — vessel/ridge segmentation reference data and 5-stage staging.
+- **Almeida2024** — vessel enhancement and segmentation methods.
+- **Rahim2024** — ROP image enhancement ideas.
+- **Vahidmoghadam2026** — combined image + vessel-mask scenario inspiration.
 
 ## Scope
 
-This project is for research and coursework. It is not a clinical diagnostic system, and its results should not be used for medical decision-making.
+This project is for research and coursework. It is not a clinical diagnostic
+system, and its results must not be used for medical decision-making.

@@ -1,64 +1,56 @@
 # Experiments Index
 
-All scripts live flat in this directory by design — 29 of 36 use sibling imports
-(`from vessel_pipeline import ...`) or `sys.path.insert`, so moving them into
-subfolders would break those imports. This index is the map instead.
+Scripts are grouped by function into three subfolders. Only the keeper scripts
+are listed here; dead-end exploration was quarantined under the repo-root
+`trashbin/` (git-ignored, kept on disk for reference).
 
-Research logs: see [`VESSEL_FINDINGS.md`](./VESSEL_FINDINGS.md) (vessel Dice log,
-locked eval protocol) and the project-root `RESULTS.md` (ROP staging results).
+```
+experiments/
+├── cnn/        Modal-hosted CNN classification (run from repo root)
+├── vessel/     Vessel-segmentation pipeline + champion recipe + eval
+└── classical/  Classical ML baselines (handcrafted features)
+```
 
-## ROP stage classification
+Research logs: [`vessel/VESSEL_FINDINGS.md`](./vessel/VESSEL_FINDINGS.md) (vessel
+Dice log, locked eval protocol) and the project-root `results/RESULTS.md` (ROP
+staging results).
+
+## cnn/ — CNN classification (Modal)
+
+| Script | Purpose |
+| --- | --- |
+| `masked_cnn_cv_v2.py` | Masked-TinyResNet, 5-fold CV under the classical baseline protocol. |
+| `masked_cnn_cv_v2_ablation.py` | v2 ablation sweep (mask channel / augmentation variants). |
+| `masked_cnn_cv_v3.py` | v3: wider model + revised augmentation/caching. |
+| `clean_manifest.json` | Curated image manifest consumed by the CNN scripts. |
+| `v2_group.log`, `v2_group_rgb.log`, `v2_stratified.log` | v2 run logs (group / group-RGB / stratified CV). |
+
+> **Run location:** these use Modal with **relative** paths
+> (`.add_local_dir("data/Zhao2024", ...)`, `.add_local_file("experiments/cnn/clean_manifest.json", ...)`),
+> so they must be invoked **from the repo root**:
+> `modal run experiments/cnn/masked_cnn_cv_v2.py`.
+
+## vessel/ — vessel segmentation
+
+| Script | Purpose |
+| --- | --- |
+| `vessel_pipeline.py` | Core vessel pipeline functions (shared import target). |
+| `advanced_pipeline.py` | Advanced multi-stage segmentation (Gabor kernels, fusion helpers). |
+| `vessel_eval.py` | Locked full-dataset eval harness for Agrawal2021 (100 pairs). |
+| `vessel_round3.py` | Tuning round 3: Gabor soft-map (`tophat_pre`). |
+| `vessel_round7.py` | Champion recipe: Gabor + Meijering fusion. |
+| `champion_overlay.py` | Render the champion overlay from the round-7 recipe. |
+| `ncc_groups.json` | Precomputed NCC grouping used by the eval split. |
+
+> Self-contained: every script does `sys.path.insert(0, Path(__file__).parent)`
+> for sibling imports and resolves output via `parents[2]/experiments/output`,
+> so they run from any working directory.
+
+## classical/ — classical ML baselines
 
 | Script | Purpose |
 | --- | --- |
 | `rop_classical.py` | Handcrafted features + classical ML. The 0.5147 macro-F1 baseline. |
 | `rop_ridge_classical.py` | Classical ridge / demarcation-line enhancement (no learned model). |
-| `rop_ridge_unet.py` | From-scratch ridge/demarcation-line U-Net. |
-| `masked_cnn_cv.py` | Masked-TinyResNet under the same 5-fold CV protocol as the classical baseline. |
-| `rop_experiment.py` | ResNet50 (ImageNet) + S1_raw + WeightedRandomSampler. |
-| `rop_training.py` | v2: wider model, MixUp, focal loss, from scratch. |
-| `rop_ssl.py` | SimCLR self-supervised pretraining on all 1099 Zhao2024 images. |
-| `train_local.py` | Local ROP classification training entrypoint. |
 
-## Vessel segmentation pipeline
-
-| Script | Purpose |
-| --- | --- |
-| `vessel_pipeline.py` | Core vessel pipeline functions (shared import target). |
-| `vessel_eval.py` | Full-dataset eval harness for Agrawal2021 (100 pairs). |
-| `vessel_modal.py` | Modal-hosted vessel segmentation runner. |
-| `advanced_pipeline.py` | Advanced multi-stage vessel segmentation pipeline. |
-| `novel_approaches.py` | Exploratory novel vessel segmentation approaches. |
-
-## Vessel tuning rounds (chronological)
-
-| Script | Purpose |
-| --- | --- |
-| `round2.py` | Color channel fusion + tuned hysteresis + preprocessing. |
-| `round3.py` | Gaussian matched filter (Chaudhuri), enhanced Frangi. |
-| `round4.py` | Entropy seeds → region growing (precision-focused). |
-| `round5.py` | Optic disc inpainting + simpler preprocessing. |
-| `round6.py` | Optimize median filtering + postprocessing on Gabor response. |
-| `round7.py` | Z-Fused-Coherence: anisotropic diffusion preprocessing. |
-| `tv_denoise_enhencement.py` | Round 8: CLAHE tile sweep, wavelet + TV-L1 denoising. |
-| `vessel_gabor_tune.py` | Round 2 soft-map: tune Gabor filter bank + preprocessing. |
-| `vessel_round3.py` | Round 3: tune around `tophat_pre` (TEST 0.4600). |
-| `vessel_round4.py` | Round 4: change the soft-map builder itself. |
-| `vessel_round5.py` | Round 5: refine `blend_sato_50` (TEST 0.4655). |
-| `vessel_round6.py` | Round 6: 3-way detector fusion vs round-5 ceiling (TEST 0.4667). |
-| `vessel_round7.py` | Round 7: fine-tune Gabor+Meijering fusion. |
-| `vessel_round8.py` | Round 8: re-optimize post-processing on round-7 winners. |
-| `vessel_variants_v1.py` | Variant search, tune on TRAIN report TEST. |
-| `vessel_variants_fast.py` | Fast variant search: precompute soft maps once per (builder, image). |
-
-## Overlay / U-Net / utilities
-
-| Script | Purpose |
-| --- | --- |
-| `overlay_config_metrics.py` | Reproduce the exact pipeline behind `output/overlay_results.jpg`. |
-| `overlay_tune.py` | Sweep overlay pipeline variations to beat mean Dice 0.466. |
-| `train_unet.py` | UNet for retinal vessel segmentation on Agrawal2021. |
-| `run_experiments.py` | Experiment runner: compare channel sources + fusion strategies. |
-| `run_zfc.py` | Z-Fused-Coherence reference implementation. |
-| `show_thresholds.py` | Visual threshold viewer for vessel detection. |
-| `test_enhancements.py` | Precompute vesselness maps, then vary thresholding/postprocessing. |
+> Data resolved via `parents[2]/data/...`, so they run from any working directory.

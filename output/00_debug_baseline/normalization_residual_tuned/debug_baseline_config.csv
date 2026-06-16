@@ -1,2 +1,0 @@
-process_max_side,vesselness_mode,clahe_clip,green_clahe_clip,green_clahe_tile_grid,background_sigma,threshold_method,target_density,triangle_nbins,fov_erode_px,min_component_area,hole_size,morphology,od_suppression,od_soft_penalty,bilateral_d,bilateral_sigma_color,bilateral_sigma_space,final_skeletonize,skeleton_min_area,skeleton_dilate_iter,auto_binary_selection,top_hat_weight,matched_weight,frangi_weight,jerman_weight
-768,almeida_paper,2.5,2.2,16,30.0,percentile,0.1,4,12,50,0,none,False,0.35,9,40.0,9.0,False,20,1,False,0.05,0.25,0.2,0.5

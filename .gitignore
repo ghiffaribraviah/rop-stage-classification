@@ -12,3 +12,7 @@ rop-datasets.zip
 *.tar.gz
 runpod
 runpod.pub
+.omo
+
+# Quarantined regenerable artifacts pending review/deletion
+trashbin/

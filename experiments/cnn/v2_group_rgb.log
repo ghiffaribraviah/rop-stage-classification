@@ -1,0 +1,83 @@
+✓ Initialized. View run at 
+https://modal.com/apps/chairulridjaal/main/ap-rWflpOvB8uPmMHQMIhBLpB
+✓ Created objects.
+├── 🔨 Created mount 
+│   /home/ubuntu/rop-stage-classification/experiments/masked_cnn_cv_v2.py
+├── 🔨 Created mount experiments/clean_manifest.json
+├── 🔨 Created mount /home/ubuntu/rop-stage-classification/data/Zhao2024
+├── 🔨 Created function run_full.
+└── 🔨 Created function quick_test.
+Loaded 1099: {'Laser': 343, 'Stage3': 261, 'Normal': 236, 'Stage2': 165, 'Stage1': 94}
+All rgb inputs cached.
+  epoch 1/160
+  epoch 20/160
+  epoch 40/160
+  epoch 60/160
+  epoch 80/160
+  epoch 100/160
+  epoch 120/160
+  epoch 140/160
+  epoch 160/160
+Fold 0: macro-F1=0.6559 (n=220)
+  epoch 1/160
+  epoch 20/160
+  epoch 40/160
+  epoch 60/160
+  epoch 80/160
+  epoch 100/160
+  epoch 120/160
+  epoch 140/160
+  epoch 160/160
+Fold 1: macro-F1=0.6364 (n=220)
+  epoch 1/160
+  epoch 20/160
+  epoch 40/160
+  epoch 60/160
+  epoch 80/160
+  epoch 100/160
+  epoch 120/160
+  epoch 140/160
+  epoch 160/160
+Fold 2: macro-F1=0.7035 (n=220)
+  epoch 1/160
+  epoch 20/160
+  epoch 40/160
+  epoch 60/160
+  epoch 80/160
+  epoch 100/160
+  epoch 120/160
+  epoch 140/160
+  epoch 160/160
+Fold 3: macro-F1=0.7283 (n=220)
+  epoch 1/160
+  epoch 20/160
+  epoch 40/160
+  epoch 60/160
+  epoch 80/160
+  epoch 100/160
+  epoch 120/160
+  epoch 140/160
+  epoch 160/160
+RESULT={"accuracy": 0.737943585077343, "f1": 0.686573230697265, "precision": 0.7002150468153299, "recall": 0.7146190160658316, "tag": "5-fold OOF [group] input=rgb ep=160 ls=0.1 mixp=0.5 tta=True", "input_mode": "rgb"}
+Fold 4: macro-F1=0.6974 (n=219)
+
+============================================================
+MASKED-TinyResNet v2 | 5-fold OOF [group] input=rgb ep=160 ls=0.1 mixp=0.5 tta=True
+============================================================
+              precision    recall  f1-score   support
+
+      Normal       0.73      0.93      0.82       236
+      Stage1       0.38      0.71      0.49        94
+      Stage2       0.57      0.53      0.55       165
+      Stage3       0.83      0.52      0.64       261
+       Laser       0.99      0.88      0.93       343
+
+    accuracy                           0.74      1099
+   macro avg       0.70      0.71      0.69      1099
+weighted avg       0.78      0.74      0.74      1099
+
+OOF Acc=0.7379  macro-F1=0.6866  P=0.7002  R=0.7146
+RESULT_JSON={"accuracy": 0.737943585077343, "f1": 0.686573230697265, "precision": 0.7002150468153299, "recall": 0.7146190160658316, "tag": "5-fold OOF [group] input=rgb ep=160 ls=0.1 mixp=0.5 tta=True", "input_mode": "rgb"}
+Stopping app - local entrypoint completed.
+✓ App completed. View run at 
+https://modal.com/apps/chairulridjaal/main/ap-rWflpOvB8uPmMHQMIhBLpB
