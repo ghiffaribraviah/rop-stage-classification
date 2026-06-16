@@ -1,3 +1,0 @@
-rank_group,name,cldice,dice,precision,recall,accuracy,image_path,mask_path
-BEST,RetCam 1.png,0.5887286912256781,0.5190049214589092,0.5431046646160792,0.49695310886180544,0.8655092461686366,/home/hoohkun/Documents/Github Repo/rop-stage-classification/data/Agrawal2021/HVDROPDB-BV/RetCam_Vessels_images/1.png,/home/hoohkun/Documents/Github Repo/rop-stage-classification/data/Agrawal2021/HVDROPDB-BV/RetCam_Vessels_masks/1.png
-WORST,Neo 1.png,0.391499795451172,0.4212408025154422,0.451902332111914,0.39447566662680855,0.8449546442841964,/home/hoohkun/Documents/Github Repo/rop-stage-classification/data/Agrawal2021/HVDROPDB-BV/Neo_Vessels_images/1.png,/home/hoohkun/Documents/Github Repo/rop-stage-classification/data/Agrawal2021/HVDROPDB-BV/Neo_Vessels_masks/1.png

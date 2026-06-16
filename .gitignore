@@ -5,9 +5,8 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 Thumbs.db
-output/.matplotlib/
-output/01_preprocessing_cache/processed/
-output/01_preprocessing_cache/splits/zhao_split_with_cache_paths.csv
+# Regenerable pipeline artifacts (debug baselines, caches, evaluation outputs)
+output/
 rop-datasets.zip
 *.tar.gz
 runpod
