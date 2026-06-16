@@ -1,15 +1,23 @@
-"""Masked-TinyResNet under the SAME 5-fold CV protocol as the 0.5147 classical baseline.
+"""Masked-TinyResNet HONEST baseline: leakage-corrected data + grouped CV.
 
-Honest head-to-head: StratifiedKFold(5, shuffle=True, random_state=42) over all 756
-images, out-of-fold predictions pooled, macro-F1 reported. The CNN input is NOT raw
-RGB - it is the byte-identical 3-channel masked construction used by the classical
-pipeline: [vessel_softmap, ridge_softmap, masked_CLAHE_green], all FOV-masked, 224x224.
-
-This isolates the question: given the same hand-engineered vessel/ridge evidence the
-classical model saw, does a small CNN learn a better decision boundary than the
-classical head?  Same folds, same images, same features -> comparable F1.
+This is the leakage-corrected counterpart to the 0.7332 "champion" run. That run
+used StratifiedKFold over 756 images, which let byte-identical duplicates and
+near-duplicate (NCC>=0.99) image pairs straddle the train/test boundary and inflate
+OOF macro-F1. Here we:
+  1. Load a clean manifest (clean_manifest.json): 721 images, 710 groups, with all
+     duplicate / near-duplicate / label-conflict images removed or grouped.
+  2. Use StratifiedGroupKFold(5, seed=42) keyed on `group` so no group's images can
+     appear in both train and test of any fold.
+The CNN input is the same byte-identical 3-channel masked construction used by the
+classical pipeline: [vessel_softmap, ridge_softmap, masked_CLAHE_green], FOV-masked,
+224x224. This measures TRUE generalization, not memorization of leaked twins.
 """
+import os
 import modal
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_MANIFEST = os.path.join(_REPO_ROOT, "experiments", "clean_manifest.json")
+_DATA_DIR = os.path.join(_REPO_ROOT, "data", "Zhao2024")
 
 # Heavy deps exist only inside the Modal image; importing them locally fails.
 # The local process only resolves the entrypoint and calls run_cv.remote(),
@@ -19,7 +27,7 @@ try:
     import cv2, numpy as np, torch, torch.nn as nn, torch.nn.functional as F
     import pandas as pd, time, random, warnings
     from pathlib import Path
-    from sklearn.model_selection import StratifiedKFold
+    from sklearn.model_selection import StratifiedGroupKFold
     from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report
     from torch.utils.data import Dataset, DataLoader
     from scipy import ndimage as ndi
@@ -31,14 +39,15 @@ except ModuleNotFoundError:
         def __getattr__(self, _): return object
     nn = _Stub(); Dataset = object
 
-app = modal.App("rop-masked-cnn-cv-champion")
-cache_vol = modal.Volume.from_name("rop-masked-cv-champion-cache", create_if_missing=True)
+app = modal.App("rop-masked-cnn-cv-honest")
+cache_vol = modal.Volume.from_name("rop-masked-cv-honest-cache", create_if_missing=True)
 
 image = (modal.Image.debian_slim(python_version="3.12")
     .apt_install("libgl1-mesa-glx", "libglib2.0-0")
     .pip_install("torch", "torchvision", "opencv-python", "numpy", "scikit-image",
                  "scikit-learn", "pandas", "scipy")
-    .add_local_dir("data/Zhao2024", remote_path="/root/data/Zhao2024"))
+    .add_local_file(_MANIFEST, remote_path="/root/clean_manifest.json")
+    .add_local_dir(_DATA_DIR, remote_path="/root/data/Zhao2024"))
 
 # ────────────────────────── shared primitives ──────────────────────────
 def norm01(i, m=None):
@@ -222,16 +231,23 @@ class CacheDataset(Dataset):
 
 @app.function(image=image, volumes={"/cache": cache_vol}, gpu="A100-80GB", timeout=10800)
 def run_cv():
+    import json
     classes = ('Normal', 'Stage1', 'Stage2', 'Stage3'); cls2id = {n: i for i, n in enumerate(classes)}
     root = Path("/root/data/Zhao2024"); cache = Path("/cache/masked3ch")
-    exts = {'.jpg', '.jpeg', '.png'}; rows = []
-    for c in classes:
-        d = root / c
-        if not d.exists(): continue
-        for p in sorted(d.iterdir()):
-            if p.suffix.lower() in exts:
-                rows.append({'path': str(p), 'label': c, 'label_id': cls2id[c], 'key': f"{c}_{p.stem}"})
-    df = pd.DataFrame(rows); print(f"Loaded {len(df)} images: {df['label'].value_counts().to_dict()}")
+
+    with open("/root/clean_manifest.json") as f:
+        manifest = json.load(f)
+    rows = []
+    for m in manifest:
+        c = m['class']; p = root / c / m['name']
+        rows.append({'path': str(p), 'label': c, 'label_id': cls2id[c],
+                     'key': m['key'], 'group': int(m['group'])})
+    df = pd.DataFrame(rows)
+    missing = [r['path'] for r in rows if not Path(r['path']).exists()]
+    if missing:
+        raise FileNotFoundError(f"{len(missing)} manifest images not found, e.g. {missing[:3]}")
+    print(f"Loaded {len(df)} clean images ({df['group'].nunique()} groups): "
+          f"{df['label'].value_counts().to_dict()}")
 
     # Pre-generate masked 3-channel inputs once (cached on volume)
     cache.mkdir(parents=True, exist_ok=True)
@@ -248,11 +264,14 @@ def run_cv():
         print("All masked inputs cached.")
 
     DEVICE = torch.device('cuda')
-    X = np.arange(len(df)); y = df['label_id'].values
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    X = np.arange(len(df)); y = df['label_id'].values; groups = df['group'].values
+    skf = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
     oof_pred = np.full(len(df), -1, dtype=int)
 
-    for fold, (tr_idx, te_idx) in enumerate(skf.split(X, y)):
+    for fold, (tr_idx, te_idx) in enumerate(skf.split(X, y, groups=groups)):
+        # Leakage guard: a group's images must never span train and test
+        leaked = set(groups[tr_idx]) & set(groups[te_idx])
+        assert not leaked, f"fold {fold} group leakage: {sorted(leaked)[:5]}"
         random.seed(42); np.random.seed(42); torch.manual_seed(42)
         tr_df, te_df = df.iloc[tr_idx], df.iloc[te_idx]
         tl = DataLoader(CacheDataset(cache, tr_df, augment=True), 32, shuffle=True, num_workers=4, drop_last=True)
@@ -284,7 +303,7 @@ def run_cv():
     acc = accuracy_score(y, oof_pred)
     p, r, f, _ = precision_recall_fscore_support(y, oof_pred, average='macro', zero_division=0)
     print("\n" + "=" * 60)
-    print("MASKED-TinyResNet  |  5-fold OOF (StratifiedKFold seed=42)")
+    print("MASKED-TinyResNet  |  5-fold OOF (StratifiedGroupKFold seed=42)")
     print("=" * 60)
     print(classification_report(y, oof_pred, target_names=classes, zero_division=0))
     print(f"OOF Acc={acc:.4f}  macro-F1={f:.4f}  P={p:.4f}  R={r:.4f}")

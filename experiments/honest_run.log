@@ -1,0 +1,12 @@
+✓ Initialized. View run at 
+https://modal.com/apps/chairulridjaal/main/ap-uSw75au8OZSy1jM6AKEWWX
+✓ Created objects.
+├── 🔨 Created mount 
+│   /home/ubuntu/rop-stage-classification/experiments/masked_cnn_cv_honest.py
+├── 🔨 Created mount 
+│   /home/ubuntu/rop-stage-classification/experiments/clean_manifest.json
+├── 🔨 Created mount /home/ubuntu/rop-stage-classification/data/Zhao2024
+└── 🔨 Created function run_cv.
+SPAWNED_CALL_ID=fc-01KV7F884NY7WCACEM2SHSEDBG
+Loaded 721 clean images (710 groups): {'Stage3': 247, 'Normal': 235, 'Stage2': 150, 'Stage1': 89}
+Generating 598 masked inputs...

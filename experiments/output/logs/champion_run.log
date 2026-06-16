@@ -1,0 +1,73 @@
+✓ Initialized. View run at 
+https://modal.com/apps/chairulridjaal/main/ap-xB3Y6YhrpS9NK9jS4TupaE
+✓ Created objects.
+├── 🔨 Created mount 
+│   /home/ubuntu/rop-stage-classification/experiments/masked_cnn_cv_champion.py
+├── 🔨 Created mount /home/ubuntu/rop-stage-classification/data/Zhao2024
+└── 🔨 Created function run_cv.
+SPAWNED_CALL_ID=fc-01KV78S57P9SDCD6EC68NCA0H6
+Loaded 756 images: {'Stage3': 261, 'Normal': 236, 'Stage2': 165, 'Stage1': 94}
+Generating 756 masked inputs...
+  [100/756] 141s
+  [200/756] 276s
+  [300/756] 410s
+  [400/756] 546s
+  [500/756] 680s
+  [600/756] 815s
+  [700/756] 951s
+Generation done in 1033s
+  fold 0 epoch 1/80
+  fold 0 epoch 20/80
+  fold 0 epoch 40/80
+  fold 0 epoch 60/80
+  fold 0 epoch 80/80
+Fold 0: macro-F1=0.7267 (n=152)
+  fold 1 epoch 1/80
+  fold 1 epoch 20/80
+  fold 1 epoch 40/80
+  fold 1 epoch 60/80
+  fold 1 epoch 80/80
+Fold 1: macro-F1=0.7515 (n=151)
+  fold 2 epoch 1/80
+  fold 2 epoch 20/80
+  fold 2 epoch 40/80
+  fold 2 epoch 60/80
+  fold 2 epoch 80/80
+Fold 2: macro-F1=0.7952 (n=151)
+  fold 3 epoch 1/80
+  fold 3 epoch 20/80
+  fold 3 epoch 40/80
+  fold 3 epoch 60/80
+  fold 3 epoch 80/80
+Fold 3: macro-F1=0.6771 (n=151)
+  fold 4 epoch 1/80
+  fold 4 epoch 20/80
+  fold 4 epoch 40/80
+  fold 4 epoch 60/80
+  fold 4 epoch 80/80
+
+Masked-CNN OOF: Acc=0.7606 F1=0.7332 vs baseline 0.5147 -> WIN
+RESULT_JSON={"accuracy": 0.7605820105820106, "f1": 0.7332174289005715, "precision": 0.7575984755758318, "recall": 0.7383109496924051, "baseline_f1": 0.5147, "improved": true}
+Fold 4: macro-F1=0.7083 (n=151)
+
+============================================================
+MASKED-TinyResNet  |  5-fold OOF (StratifiedKFold seed=42)
+============================================================
+              precision    recall  f1-score   support
+
+      Normal       0.96      0.88      0.92       236
+      Stage1       0.62      0.56      0.59        94
+      Stage2       0.52      0.83      0.64       165
+      Stage3       0.94      0.68      0.79       261
+
+    accuracy                           0.76       756
+   macro avg       0.76      0.74      0.73       756
+weighted avg       0.81      0.76      0.77       756
+
+OOF Acc=0.7606  macro-F1=0.7332  P=0.7576  R=0.7383
+
+Classical baseline macro-F1 = 0.5147
+Masked-CNN     macro-F1 = 0.7332  (WIN)
+Stopping app - local entrypoint completed.
+✓ App completed. View run at 
+https://modal.com/apps/chairulridjaal/main/ap-xB3Y6YhrpS9NK9jS4TupaE

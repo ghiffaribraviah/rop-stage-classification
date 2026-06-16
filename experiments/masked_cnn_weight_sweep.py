@@ -1,23 +1,26 @@
-"""Masked-TinyResNet under the SAME 5-fold CV protocol as the 0.5147 classical baseline.
+"""Meijering/Gabor fusion-weight sweep for the masked-CNN ROP stage classifier.
 
-Honest head-to-head: StratifiedKFold(5, shuffle=True, random_state=42) over all 756
-images, out-of-fold predictions pooled, macro-F1 reported. The CNN input is NOT raw
-RGB - it is the byte-identical 3-channel masked construction used by the classical
-pipeline: [vessel_softmap, ridge_softmap, masked_CLAHE_green], all FOV-masked, 224x224.
+Question this answers: the vessel-segmentation champion (0.40*gabor + 0.60*meijering)
+won on binary Dice (0.4739) but LOST on classification macro-F1 (0.7332 vs 0.7425
+baseline). Does a lower meijering weight recover macro-F1 above the baseline?
 
-This isolates the question: given the same hand-engineered vessel/ridge evidence the
-classical model saw, does a small CNN learn a better decision boundary than the
-classical head?  Same folds, same images, same features -> comparable F1.
+Strategy (cost control): the expensive part is building the per-image component maps
+(gabor_tophat, meijering_fine, ridge, green). Those do NOT depend on the fusion weight,
+so we build them ONCE and cache four uint8 channels per image at 224x224:
+  {key}_comp.png  = BGR-packed [gabor, meijering, ridge]
+  {key}_grn.png   = grayscale  green
+Then for each weight w_m in the sweep we fuse  (1-w_m)*gabor + w_m*meijering  at
+dataset-load time, renormalize, and run the IDENTICAL 5-fold CV protocol. One channel
+build, N cheap CV runs.
+
+Anchor check: w_m=0.60 MUST reproduce the champion's ~0.7332 macro-F1 (within CV noise).
+If it does not, the load-time-fusion approximation is rejected and the result is void.
 """
 import modal
 
-# Heavy deps exist only inside the Modal image; importing them locally fails.
-# The local process only resolves the entrypoint and calls run_cv.remote(),
-# which executes inside the image - it never touches these names. The stub lets
-# `class X(nn.Module)` resolve its base class at import time without the deps.
 try:
     import cv2, numpy as np, torch, torch.nn as nn, torch.nn.functional as F
-    import pandas as pd, time, random, warnings
+    import pandas as pd, time, random, warnings, json
     from pathlib import Path
     from sklearn.model_selection import StratifiedKFold
     from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report
@@ -31,8 +34,8 @@ except ModuleNotFoundError:
         def __getattr__(self, _): return object
     nn = _Stub(); Dataset = object
 
-app = modal.App("rop-masked-cnn-cv-champion")
-cache_vol = modal.Volume.from_name("rop-masked-cv-champion-cache", create_if_missing=True)
+app = modal.App("rop-masked-cnn-weight-sweep")
+cache_vol = modal.Volume.from_name("rop-masked-cv-sweep-cache", create_if_missing=True)
 
 image = (modal.Image.debian_slim(python_version="3.12")
     .apt_install("libgl1-mesa-glx", "libglib2.0-0")
@@ -40,7 +43,9 @@ image = (modal.Image.debian_slim(python_version="3.12")
                  "scikit-learn", "pandas", "scipy")
     .add_local_dir("data/Zhao2024", remote_path="/root/data/Zhao2024"))
 
-# ────────────────────────── shared primitives ──────────────────────────
+# Sweep grid: meijering weight; gabor weight = 1 - w_m. 0.60 is the champion anchor.
+SWEEP_WM = (0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60)
+
 def norm01(i, m=None):
     v = i[m] if m is not None else i.ravel(); v = v[np.isfinite(v)]
     if v.size == 0: return np.zeros(i.shape, np.float32)
@@ -56,20 +61,7 @@ def est_fov(rgb):
     if nl > 1: m = (labels == 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))).astype(np.uint8)
     return m.astype(bool)
 
-# ── vessel softmap: CHAMPION recipe (g40_m60_fine) ─────────────────────────────
-# Source of truth: experiments/vessel_champion_config.csv. The champion that won the
-# vessel-segmentation sweep (Dice 0.4739 vs 0.4469 baseline) is the fusion
-#   0.40 * gabor_tophat  +  0.60 * meijering_fine
-# where gabor_tophat is the original Gabor->median->CLAHE soft map (kept byte-identical
-# below) and meijering_fine is a Hessian ridge detector at FINE sigmas tuned for thin
-# peripheral vessels.
-#
-# NOTE ON BINARIZATION: the champion's Dice score also involved a threshold + connected-
-# component cleanup (P0.16, top-3 CC, 3x3 close). That stage exists only to emit a BINARY
-# mask for Dice scoring. Here the map feeds a CNN channel, which benefits from the
-# continuous soft signal, so we deliberately fuse and renormalize but DO NOT binarize.
 MEIJERING_FINE_SCALES = (0.8, 1.4, 2.0, 2.8, 3.6, 4.5)
-# Faithful to vessel_round3.build_soft: gabor input is norm(0.5*norm(inv)+0.5*tophat).
 FULL_KS = (5, 7, 9, 13, 17, 23, 31)
 
 def tophat_custom(inv, fov, kernel_sizes=FULL_KS):
@@ -94,10 +86,8 @@ def gabor_resp(inv_f, fov):
             r = np.maximum(r, cv2.filter2D(inv_f, cv2.CV_32F, gk, borderType=cv2.BORDER_REFLECT))
     r[~fov] = 0; return norm01(r, fov)
 
+# ── COMPONENT 1: gabor_tophat (champion term, gabor weight = 1 - w_m) ──
 def gabor_tophat_softmap(rgb, fov):
-    """Faithful port of vessel_round3.build_soft(rgb, fov, 0.5, FULL_KS, 15, 7, 12.0).
-    Champion term, weight 0.40. The top-hat blend (0.5*norm(inv)+0.5*tophat) is what
-    defines build_soft; feeding raw norm(inv) to Gabor is the bug fixed here."""
     g = rgb[:, :, 1].copy(); g[~fov] = 0
     enh = cv2.createCLAHE(clipLimit=6, tileGridSize=(16, 16)).apply(g); enh[~fov] = 0
     inv = 255 - enh
@@ -111,13 +101,6 @@ def gabor_tophat_softmap(rgb, fov):
     return norm01(enh2.astype(np.float32), fov)
 
 def meijering_fine_softmap(rgb, fov):
-    """Hessian ridge response at fine sigmas (thin peripheral vessels). Champion term, weight 0.60.
-
-    Faithful to vessel_round7.mei_ch/_inv_green: meijering is fed inv = (255-enh)/255.0
-    (plain 0..1 scaling), NOT a percentile norm01 stretch. The Hessian eigen-analysis is
-    intensity-scale sensitive, so the percentile stretch changed the ridge response on
-    50-78% of FOV pixels (corr~0.4). This term carries 0.60 fusion weight, so the stretch
-    silently corrupted the dominant channel; revert to the source's /255 scaling."""
     g = rgb[:, :, 1].copy(); g[~fov] = 0
     enh = cv2.createCLAHE(clipLimit=6, tileGridSize=(16, 16)).apply(g); enh[~fov] = 0
     inv_f = (255 - enh).astype(np.float32) / 255.0; inv_f[~fov] = 0.0
@@ -125,15 +108,7 @@ def meijering_fine_softmap(rgb, fov):
     resp = np.nan_to_num(resp, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32); resp[~fov] = 0.0
     return norm01(resp, fov)
 
-def vessel_softmap(rgb, fov):
-    """Champion fusion: 0.40*gabor_tophat + 0.60*meijering_fine, FOV-masked, renormalized."""
-    gab = gabor_tophat_softmap(rgb, fov)
-    mei = meijering_fine_softmap(rgb, fov)
-    fused = 0.40 * gab + 0.60 * mei
-    fused[~fov] = 0.0
-    return norm01(fused.astype(np.float32), fov)
-
-# ── ridge softmap (meijering + oriented tophat, weight 0.4; identical to ridge_response_map) ──
+# ── ridge softmap (channel 2; weight-independent) ──
 RIDGE_SCALES = (3, 5, 7, 9, 11)
 def ridge_source_channel(rgb, fov):
     green = rgb[:, :, 1].copy(); green[~fov] = 0
@@ -160,20 +135,27 @@ def ridge_softmap(rgb, fov):
     resp = 0.6 * hessian_ridge(ch, fov) + 0.4 * oriented_tophat(ch, fov)
     return norm01(resp.astype(np.float32), fov)
 
-def build_channels(path):
-    """3-channel masked input: [vessel, ridge, masked_green] at 224x224, uint8."""
+# ────────────────────────── component cache builder ──────────────────────────
+# We cache FOUR weight-independent maps per image, all at 224x224 uint8, all FOV-zeroed:
+#   comp.png (BGR) = [B=gabor, G=meijering, R=ridge];  grn.png = green (CLAHE).
+# Splitting gabor and meijering into separate cached channels is the whole point: the
+# fusion (1-w_m)*gab + w_m*mei is then a cheap load-time op, so one build serves every w_m.
+def build_components(path):
     rgb = cv2.cvtColor(cv2.imread(str(path), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
     h, w = rgb.shape[:2]; s = min(1.0, 768 / max(h, w))
     wrk = cv2.resize(rgb, (int(w * s), int(h * s)), cv2.INTER_AREA) if s < 1 else rgb.copy()
     fov = est_fov(wrk)
-    ves = vessel_softmap(wrk, fov)
+    gab = gabor_tophat_softmap(wrk, fov)      # full-res, FOV-zeroed
+    mei = meijering_fine_softmap(wrk, fov)
     rid = ridge_softmap(wrk, fov)
-    grn = ridge_source_channel(wrk, fov)  # CLAHE green, FOV-masked
-    stack = np.stack([ves, rid, grn], axis=-1)  # HxWx3 float [0,1]
-    stack = cv2.resize(stack, (224, 224), interpolation=cv2.INTER_AREA)
-    return np.clip(stack * 255, 0, 255).astype(np.uint8)
+    grn = ridge_source_channel(wrk, fov)
+    comp = np.stack([gab, mei, rid], axis=-1)  # HxWx3 float [0,1]
+    comp = cv2.resize(comp, (224, 224), interpolation=cv2.INTER_AREA)
+    grn = cv2.resize(grn, (224, 224), interpolation=cv2.INTER_AREA)
+    comp_u8 = np.clip(comp * 255, 0, 255).astype(np.uint8)  # H W 3 = [gab, mei, rid]
+    grn_u8 = np.clip(grn * 255, 0, 255).astype(np.uint8)
+    return comp_u8, grn_u8
 
-# ────────────────────────── model ──────────────────────────
 class BasicBlock(nn.Module):
     def __init__(self, ic, oc, s=1):
         super().__init__()
@@ -202,28 +184,74 @@ class FocalLoss(nn.Module):
         ce = F.cross_entropy(logits, targets, weight=self.weight, reduction='none')
         return ((1 - torch.exp(-ce)) ** self.gamma * ce).mean()
 
-class CacheDataset(Dataset):
-    def __init__(self, cache, df, augment=False):
-        self.cache = cache; self.df = df.reset_index(drop=True); self.augment = augment
+# Reads the cached weight-independent channels and fuses the vessel map per w_m:
+#   vessel = norm01( (1-w_m)*gabor + w_m*meijering ), then stacks [vessel, ridge, green].
+# Byte-equivalent to champion.build_channels EXCEPT the fusion weight is swept instead of
+# fixed at 0.60; renorm, channel order, [0,1] scaling and augmentation stay identical so
+# folds remain comparable to the champion run.
+class FusionDataset(Dataset):
+    def __init__(self, cache, df, w_m, augment=False):
+        self.cache = cache; self.df = df.reset_index(drop=True)
+        self.w_m = float(w_m); self.augment = augment
     def __len__(self): return len(self.df)
     def __getitem__(self, idx):
         r = self.df.iloc[idx]
-        img = cv2.imread(str(self.cache / f"{r['key']}.png"), cv2.IMREAD_COLOR)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        comp = cv2.imread(str(self.cache / f"{r['key']}_comp.png"), cv2.IMREAD_COLOR)  # BGR=[rid,mei,gab]
+        grn = cv2.imread(str(self.cache / f"{r['key']}_grn.png"), cv2.IMREAD_GRAYSCALE)
+        # cv2 reads BGR; we wrote RGB=[gab,mei,rid] so BGR channels are [rid,mei,gab].
+        rid = comp[:, :, 0].astype(np.float32) / 255.0
+        mei = comp[:, :, 1].astype(np.float32) / 255.0
+        gab = comp[:, :, 2].astype(np.float32) / 255.0
+        grn = grn.astype(np.float32) / 255.0
+        fused = (1.0 - self.w_m) * gab + self.w_m * mei
+        ves = norm01(fused.astype(np.float32))  # renorm exactly like vessel_softmap
+        img = np.stack([ves, rid, grn], axis=-1)  # H W 3 = [vessel, ridge, green]
         if self.augment:
             if random.random() > 0.5: img = np.fliplr(img).copy()
             if random.random() > 0.5: img = np.flipud(img).copy()
             ang = random.uniform(-15, 15); h, w = img.shape[:2]
             M = cv2.getRotationMatrix2D((w / 2, h / 2), ang, 1.0)
             img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-        # No ImageNet normalization: channels are [0,1] softmaps, not natural RGB.
-        img = img.astype(np.float32) / 255.0
         return torch.from_numpy(img.transpose(2, 0, 1)).float(), torch.tensor(int(r['label_id']), dtype=torch.long)
 
-@app.function(image=image, volumes={"/cache": cache_vol}, gpu="A100-80GB", timeout=10800)
-def run_cv():
+def run_cv_for_weight(cache, df, w_m, device):
+    """Run the IDENTICAL 5-fold CV protocol (seed=42, 80 epochs) for one fusion weight."""
+    X = np.arange(len(df)); y = df['label_id'].values
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    oof_pred = np.full(len(df), -1, dtype=int)
+    for fold, (tr_idx, te_idx) in enumerate(skf.split(X, y)):
+        random.seed(42); np.random.seed(42); torch.manual_seed(42)
+        tr_df, te_df = df.iloc[tr_idx], df.iloc[te_idx]
+        tl = DataLoader(FusionDataset(cache, tr_df, w_m, augment=True), 32, shuffle=True, num_workers=4, drop_last=True)
+        el = DataLoader(FusionDataset(cache, te_df, w_m, augment=False), 32, shuffle=False, num_workers=4)
+        model = TinyResNetV2().to(device)
+        cnt = np.array([int((tr_df['label_id'] == i).sum()) for i in range(4)], np.float32)
+        w = torch.tensor(cnt.sum() / (4 * np.maximum(cnt, 1)), dtype=torch.float32).to(device)
+        crit = FocalLoss(gamma=1.0, weight=w)
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=80)
+        for ep in range(1, 81):
+            model.train()
+            for imgs, lbls in tl:
+                imgs, lbls = imgs.to(device), lbls.to(device)
+                opt.zero_grad(); crit(model(imgs), lbls).backward(); opt.step()
+            sched.step()
+        model.eval(); preds = []
+        with torch.no_grad():
+            for imgs, _ in el:
+                preds.extend(torch.argmax(model(imgs.to(device)), 1).cpu().tolist())
+        oof_pred[te_idx] = preds
+        ff = precision_recall_fscore_support(te_df['label_id'].values, preds, average='macro', zero_division=0)[2]
+        print(f"  [w_m={w_m:.2f}] fold {fold}: macro-F1={ff:.4f} (n={len(te_idx)})")
+    acc = accuracy_score(y, oof_pred)
+    p, r, f, _ = precision_recall_fscore_support(y, oof_pred, average='macro', zero_division=0)
+    return {'w_m': float(w_m), 'accuracy': float(acc), 'f1': float(f),
+            'precision': float(p), 'recall': float(r)}
+
+@app.function(image=image, volumes={"/cache": cache_vol}, gpu="A100-80GB", timeout=43200)
+def run_sweep():
     classes = ('Normal', 'Stage1', 'Stage2', 'Stage3'); cls2id = {n: i for i, n in enumerate(classes)}
-    root = Path("/root/data/Zhao2024"); cache = Path("/cache/masked3ch")
+    root = Path("/root/data/Zhao2024"); cache = Path("/cache/components")
     exts = {'.jpg', '.jpeg', '.png'}; rows = []
     for c in classes:
         d = root / c
@@ -233,79 +261,67 @@ def run_cv():
                 rows.append({'path': str(p), 'label': c, 'label_id': cls2id[c], 'key': f"{c}_{p.stem}"})
     df = pd.DataFrame(rows); print(f"Loaded {len(df)} images: {df['label'].value_counts().to_dict()}")
 
-    # Pre-generate masked 3-channel inputs once (cached on volume)
+    # Build weight-independent component channels ONCE (cached on volume).
     cache.mkdir(parents=True, exist_ok=True)
-    todo = [r for _, r in df.iterrows() if not (cache / f"{r['key']}.png").exists()]
+    todo = [r for _, r in df.iterrows() if not (cache / f"{r['key']}_comp.png").exists()]
     if todo:
-        print(f"Generating {len(todo)} masked inputs...")
+        print(f"Building {len(todo)} component sets...")
         t0 = time.time()
         for i, r in enumerate(todo):
-            ch = build_channels(r['path'])
-            cv2.imwrite(str(cache / f"{r['key']}.png"), cv2.cvtColor(ch, cv2.COLOR_RGB2BGR))
+            comp_u8, grn_u8 = build_components(r['path'])
+            # comp_u8 is RGB=[gab,mei,rid]; cv2.imwrite expects BGR, so convert to keep it round-trippable.
+            cv2.imwrite(str(cache / f"{r['key']}_comp.png"), cv2.cvtColor(comp_u8, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(str(cache / f"{r['key']}_grn.png"), grn_u8)
             if (i + 1) % 100 == 0: print(f"  [{i + 1}/{len(todo)}] {time.time() - t0:.0f}s")
-        cache_vol.commit(); print(f"Generation done in {time.time() - t0:.0f}s")
+        cache_vol.commit(); print(f"Component build done in {time.time() - t0:.0f}s")
     else:
-        print("All masked inputs cached.")
+        print("All component channels cached.")
 
-    DEVICE = torch.device('cuda')
-    X = np.arange(len(df)); y = df['label_id'].values
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    oof_pred = np.full(len(df), -1, dtype=int)
+    device = torch.device('cuda')
+    results = []
+    for w_m in SWEEP_WM:
+        print(f"\n{'=' * 60}\nFUSION WEIGHT SWEEP  w_m={w_m:.2f}  (gabor={1 - w_m:.2f})\n{'=' * 60}")
+        res = run_cv_for_weight(cache, df, w_m, device)
+        results.append(res)
+        print(f"  -> w_m={w_m:.2f}: OOF Acc={res['accuracy']:.4f} macro-F1={res['f1']:.4f}")
 
-    for fold, (tr_idx, te_idx) in enumerate(skf.split(X, y)):
-        random.seed(42); np.random.seed(42); torch.manual_seed(42)
-        tr_df, te_df = df.iloc[tr_idx], df.iloc[te_idx]
-        tl = DataLoader(CacheDataset(cache, tr_df, augment=True), 32, shuffle=True, num_workers=4, drop_last=True)
-        el = DataLoader(CacheDataset(cache, te_df, augment=False), 32, shuffle=False, num_workers=4)
+    # Anchor check: w_m=0.60 must reproduce champion ~0.7332 within CV noise (~0.01).
+    anchor = next((r for r in results if abs(r['w_m'] - 0.60) < 1e-6), None)
+    CHAMPION_F1 = 0.7332; BASELINE_F1 = 0.7425
+    anchor_ok = anchor is not None and abs(anchor['f1'] - CHAMPION_F1) <= 0.015
+    best = max(results, key=lambda r: r['f1'])
 
-        model = TinyResNetV2().to(DEVICE)
-        cnt = np.array([int((tr_df['label_id'] == i).sum()) for i in range(4)], np.float32)
-        w = torch.tensor(cnt.sum() / (4 * np.maximum(cnt, 1)), dtype=torch.float32).to(DEVICE)
-        crit = FocalLoss(gamma=1.0, weight=w)
-        opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
-        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=80)
-
-        for ep in range(1, 81):
-            model.train()
-            for imgs, lbls in tl:
-                imgs, lbls = imgs.to(DEVICE), lbls.to(DEVICE)
-                opt.zero_grad(); crit(model(imgs), lbls).backward(); opt.step()
-            sched.step()
-            if ep % 20 == 0 or ep == 1: print(f"  fold {fold} epoch {ep}/80")
-
-        model.eval(); preds = []
-        with torch.no_grad():
-            for imgs, _ in el:
-                preds.extend(torch.argmax(model(imgs.to(DEVICE)), 1).cpu().tolist())
-        oof_pred[te_idx] = preds
-        f = precision_recall_fscore_support(te_df['label_id'].values, preds, average='macro', zero_division=0)[2]
-        print(f"Fold {fold}: macro-F1={f:.4f} (n={len(te_idx)})")
-
-    acc = accuracy_score(y, oof_pred)
-    p, r, f, _ = precision_recall_fscore_support(y, oof_pred, average='macro', zero_division=0)
     print("\n" + "=" * 60)
-    print("MASKED-TinyResNet  |  5-fold OOF (StratifiedKFold seed=42)")
+    print("WEIGHT SWEEP SUMMARY  |  5-fold OOF (StratifiedKFold seed=42)")
     print("=" * 60)
-    print(classification_report(y, oof_pred, target_names=classes, zero_division=0))
-    print(f"OOF Acc={acc:.4f}  macro-F1={f:.4f}  P={p:.4f}  R={r:.4f}")
-    print(f"\nClassical baseline macro-F1 = 0.5147")
-    print(f"Masked-CNN     macro-F1 = {f:.4f}  ({'WIN' if f > 0.5147 else 'no improvement'})")
-    return {'accuracy': float(acc), 'f1': float(f), 'precision': float(p), 'recall': float(r),
-            'baseline_f1': 0.5147, 'improved': bool(f > 0.5147)}
+    print(f"{'w_m':>6} {'gabor':>6} {'Acc':>8} {'macro-F1':>10}")
+    for r in results:
+        flag = ''
+        if abs(r['w_m'] - 0.60) < 1e-6: flag += ' <-anchor'
+        if r is best: flag += ' <-BEST'
+        print(f"{r['w_m']:>6.2f} {1 - r['w_m']:>6.2f} {r['accuracy']:>8.4f} {r['f1']:>10.4f}{flag}")
+    print("-" * 60)
+    print(f"Anchor (w_m=0.60) macro-F1 = {anchor['f1'] if anchor else float('nan'):.4f} "
+          f"vs champion {CHAMPION_F1:.4f} -> {'OK' if anchor_ok else 'REJECTED (approximation void)'}")
+    print(f"Baseline macro-F1 = {BASELINE_F1:.4f}")
+    print(f"Best: w_m={best['w_m']:.2f} macro-F1={best['f1']:.4f} "
+          f"-> {'BEATS baseline' if best['f1'] > BASELINE_F1 else 'no improvement over baseline'}")
+    return {'results': results, 'anchor_ok': bool(anchor_ok), 'best': best,
+            'champion_f1': CHAMPION_F1, 'baseline_f1': BASELINE_F1}
 
 @app.local_entrypoint()
 def main():
-    # Use .spawn() not .remote(): a spawned FunctionCall is owned by Modal and
-    # survives the local launcher disconnecting. .remote()/.map() in a detached
-    # app get canceled when the caller goes away (Modal warns about this).
-    # We print the call ID so the run can be re-attached from any process via
-    # modal.FunctionCall.from_id(<id>).get().
-    fc = run_cv.spawn()
+    # .spawn() (not .remote()): a spawned FunctionCall is owned by Modal and survives the
+    # local launcher disconnecting. Print the call ID so the run can be re-attached via
+    # modal.FunctionCall.from_id(<id>).get() from any process.
+    fc = run_sweep.spawn()
     print(f"SPAWNED_CALL_ID={fc.object_id}", flush=True)
-    import json
-    with open("/tmp/champion_call_id.txt", "w") as f:
+    with open("/tmp/weight_sweep_call_id.txt", "w") as f:
         f.write(fc.object_id)
     r = fc.get()
-    print(f"\nMasked-CNN OOF: Acc={r['accuracy']:.4f} F1={r['f1']:.4f} "
-          f"vs baseline 0.5147 -> {'WIN' if r['improved'] else 'no improvement'}")
+    best = r['best']
+    print(f"\nSweep done. anchor_ok={r['anchor_ok']} "
+          f"best w_m={best['w_m']:.2f} macro-F1={best['f1']:.4f} "
+          f"vs baseline {r['baseline_f1']:.4f} "
+          f"-> {'WIN' if best['f1'] > r['baseline_f1'] else 'no improvement'}")
     print("RESULT_JSON=" + json.dumps(r), flush=True)
