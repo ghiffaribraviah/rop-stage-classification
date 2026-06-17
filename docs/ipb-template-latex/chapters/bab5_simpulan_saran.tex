@@ -1,0 +1,81 @@
+%==============================================================
+% BAB V  SIMPULAN DAN SARAN
+%==============================================================
+
+\chapter{SIMPULAN DAN SARAN}
+
+%--------------------------------------------------------------
+\section{Simpulan}
+%--------------------------------------------------------------
+
+Penelitian ini membangun dan mengevaluasi sebuah \textit{pipeline} klasifikasi \textit{stage}
+\textit{Retinopathy of Prematurity} (ROP) dari citra fundus bayi, dengan fokus pada pengaruh
+berbagai bentuk representasi citra terhadap performa model jaringan saraf tiruan. Berdasarkan
+seluruh rangkaian eksperimen yang telah dilakukan, diperoleh tiga simpulan utama.
+
+\textbf{Pertama, representasi spasial pembuluh darah jauh lebih efektif daripada ringkasan
+fitur skalar.} Percobaan ablasi yang terkontrol---menggunakan model, data, protokol, dan
+\textit{hyperparameter} yang identik dengan satu-satunya variabel yang berbeda adalah
+representasi input---menunjukkan bahwa masukan \textit{softmap} tiga kanal (peta pembuluh
+darah + peta area tepi + kanal hijau ternormalisasi) menghasilkan \textit{macro F1-score} sebesar
+0,7853, dibanding 0,6866 untuk masukan RGB mentah. Peningkatan terkontrol sebesar +0,0987 ini
+sepenuhnya dapat dikaitkan dengan kualitas representasi input, bukan perbedaan model atau
+protokol. Baseline klasik terbaik yang menggunakan fitur vaskular yang sama namun diringkas
+menjadi vektor 48 dimensi hanya mencapai 0,5147. Jaringan saraf dapat memanfaatkan struktur
+spasial dari informasi yang sama secara jauh lebih efektif.
+
+\textbf{Kedua, protokol validasi silang yang mempertimbangkan kelompok citra adalah syarat
+wajib untuk mendapatkan estimasi performa yang bisa dipercaya.} Apabila pembagian data
+dilakukan pada tingkat citra tanpa mempertimbangkan kelompok, citra dari mata yang sama dapat
+masuk ke kedua sisi batas pelatihan dan pengujian, sehingga model berisiko mempelajari
+identitas mata alih-alih pola penyakit dan menghasilkan estimasi performa yang terlalu
+optimistis. Dengan menerapkan \textit{StratifiedGroupKFold} atas 721 kelompok yang
+teridentifikasi, angka yang dilaporkan (0,7853) merupakan estimasi yang lebih jujur dan dapat
+dipertanggungjawabkan secara metodologis.
+
+\textbf{Ketiga, kompleksitas tambahan tidak selalu memberikan perbaikan.} Dua pendekatan
+yang secara intuitif tampak menjanjikan---\textit{ordinal smoothing} dan \textit{oversampling}---keduanya
+terbukti tidak berhasil dalam penelitian ini. \textit{Ordinal smoothing} menurunkan performa
+sebesar 0,055, sementara \textit{oversampling} Stage 1 justru memperburuk masalah presisi.
+Model \textit{TinyResNetV2} sederhana yang dilatih dari awal dengan \textit{focal loss} dan
+kalibrasi pasca-hoc yang transparan merupakan pendekatan terbaik yang ditemukan.
+
+%--------------------------------------------------------------
+\section{Saran}
+%--------------------------------------------------------------
+
+Berdasarkan temuan dan keterbatasan penelitian ini, beberapa saran untuk penelitian lanjutan
+adalah sebagai berikut:
+
+\textbf{(1) Penggunaan segmenter yang dapat dipelajari untuk area tepi (\textit{ridge}).}
+Pipeline segmentasi klasik dalam penelitian ini hanya mampu mendeteksi sekitar 37\% piksel
+\textit{demarcation line} pada Stage 1, yang merupakan hambatan utama dalam meningkatkan
+F1-score Stage 1. Penggunaan model segmentasi berbasis jaringan saraf seperti U-Net
+\citep{Ronneberger2015} yang dilatih secara khusus untuk mendeteksi \textit{demarcation line}
+dan \textit{ridge} dapat menghasilkan peta area tepi yang jauh lebih lengkap dan akurat,
+yang kemudian dapat meningkatkan performa klasifikasi Stage 1 secara bermakna.
+
+\textbf{(2) Pengumpulan data dengan metadata pasien yang terstruktur.} Penelitian ini
+menghadapi keterbatasan dalam validasi karena tidak tersedianya ID pasien yang terverifikasi
+pada dataset yang digunakan. Penelitian selanjutnya sebaiknya menggunakan dataset dengan
+metadata pasien yang lengkap sehingga pembagian data dapat dilakukan pada tingkat pasien,
+bukan pada tingkat estimasi kemiripan citra.
+
+\textbf{(3) Pengujian pada data dari berbagai jenis kamera dan kondisi klinis yang berbeda.}
+Dataset Zhao2024 didominasi oleh citra dari satu jenis kamera dan satu negara. Kemampuan
+model untuk bekerja dengan baik pada citra dari kamera lain (misalnya kamera wide-field atau
+kamera portabel) perlu diuji secara terpisah sebelum model ini dapat dipertimbangkan untuk
+aplikasi skrining yang lebih luas.
+
+\textbf{(4) Eksplorasi strategi yang mengurangi prediksi palsu positif Stage 1.} Hasil
+penelitian menunjukkan bahwa masalah utama pada Stage 1 adalah presisi yang rendah (0,45),
+bukan \textit{recall} (0,77). Penelitian selanjutnya perlu mencari pendekatan yang secara
+spesifik mengurangi kesalahan memprediksi Stage 1 pada sampel Stage 2, misalnya dengan
+menggunakan mekanisme perhatian (\textit{attention mechanism}) yang dapat memfokuskan model
+pada perbedaan halus antara kedua kelas tersebut.
+
+\textbf{(5) Integrasi dengan sistem skrining klinis yang lebih luas.} Dalam jangka panjang,
+model yang dikembangkan perlu divalidasi secara klinis dalam lingkungan nyata dengan melibatkan
+dokter spesialis sebagai evaluator akhir. Penelitian kolaboratif antara peneliti komputer dan
+praktisi medis diperlukan untuk memastikan bahwa metrik yang dioptimalkan dalam penelitian
+benar-benar mencerminkan kebutuhan diagnosis klinis yang sesungguhnya.

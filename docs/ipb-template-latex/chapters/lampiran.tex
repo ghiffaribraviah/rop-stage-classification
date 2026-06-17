@@ -1,0 +1,132 @@
+%==============================================================
+% LAMPIRAN
+%==============================================================
+
+% Halaman standalone judul "LAMPIRAN" di tengah halaman
+\clearpage
+\vspace*{\fill}
+\begin{center}
+  {\fontsize{14pt}{17pt}\selectfont\bfseries LAMPIRAN}
+\end{center}
+\vspace*{\fill}
+\addcontentsline{toc}{chapter}{LAMPIRAN}
+
+%--------------------------------------------------------------
+% LAMPIRAN 1: Konfigurasi Hyperparameter Model
+%--------------------------------------------------------------
+\clearpage
+
+\refstepcounter{lampiran}
+\addcontentsline{lamp}{lampiran}{\protect\numberline{\thelampiran}Lampiran 1\enspace
+Konfigurasi \textit{Hyperparameter} Model TinyResNetV2}
+\label{lamp:hyperparameter}
+
+\noindent\hangindent=5.6em
+\makebox[5.4em][l]{\textbf{Lampiran \thelampiran}}%
+Konfigurasi \textit{Hyperparameter} Model TinyResNetV2 pada Eksperimen Terbaik
+
+\vspace{4pt}
+
+\centering
+\begin{tabular}{l l}
+  \toprule
+  \textbf{Parameter} & \textbf{Nilai} \\
+  \midrule
+  Arsitektur          & TinyResNetV2 (3 stage residual) \\
+  Lebar kanal         & 48 / 96 / 192 \\
+  Ukuran input        & $224 \times 224$ piksel \\
+  Jumlah kelas        & 5 \\
+  Fungsi kerugian     & Focal Loss ($\gamma = 1{,}0$) \\
+  Bobot kelas         & Berbanding terbalik dengan frekuensi \\
+  Optimizer           & AdamW \\
+  Laju belajar        & $10^{-3}$ \\
+  Peluruhan bobot     & $5 \times 10^{-4}$ \\
+  Penjadwalan LR      & \textit{Cosine annealing} \\
+  Jumlah epoch        & 160 \\
+  Ukuran batch        & 32 \\
+  Augmentasi MixUp    & $\alpha = 0{,}2$, $p = 0{,}5$ \\
+  Augmentasi CutMix   & $\alpha = 1{,}0$, $p = 0{,}5$ \\
+  \textit{Label smoothing} & 0,1 \\
+  \textit{Stochastic depth} & $0 \rightarrow 0{,}2$ \\
+  Weight EMA decay    & 0,999 \\
+  Protokol CV         & StratifiedGroupKFold, 5 \textit{fold} \\
+  Platform komputasi  & Modal (A100-80GB) \\
+  \bottomrule
+\end{tabular}
+
+\clearpage
+
+%--------------------------------------------------------------
+% LAMPIRAN 2: Konfigurasi Pipeline Segmentasi Pembuluh Darah
+%--------------------------------------------------------------
+
+\refstepcounter{lampiran}
+\addcontentsline{lamp}{lampiran}{\protect\numberline{\thelampiran}Lampiran 2\enspace
+Konfigurasi Pipeline Segmentasi Pembuluh Darah Terbaik}
+\label{lamp:vessel_config}
+
+\noindent\hangindent=5.6em
+\makebox[5.4em][l]{\textbf{Lampiran \thelampiran}}%
+Konfigurasi Pipeline Segmentasi Pembuluh Darah Terbaik (\textit{g40\_m60\_fine})
+
+\vspace{4pt}
+
+\noindent
+\begin{tabular}{l l}
+  \toprule
+  \textbf{Parameter} & \textbf{Nilai} \\
+  \midrule
+  Kanal sumber & Kanal hijau (G) dari RGB \\
+  CLAHE pertama & \textit{Clip limit} 6,0; \textit{tile} $16 \times 16$ \\
+  Preprocessing top-hat & Kernel elips, jari-jari 5 piksel \\
+  Gabor: sigma & 1,5; 2,5; 3,5; 5,0 piksel \\
+  Gabor: lambda & 3; 5; 7; 10 piksel \\
+  Gabor: sudut & 12 sudut ($0°$--$165°$, langkah $15°$) \\
+  Median blur & Kernel $7 \times 7$ \\
+  CLAHE kedua & \textit{Clip limit} 12,0; \textit{tile} $12 \times 12$ \\
+  Meijering: sigma halus & 0,8; 1,4; 2,0; 2,8; 3,6; 4,5 piksel \\
+  Formula fusi & $0{,}40 \times \text{gabor\_tophat} + 0{,}60 \times \text{meijering\_fine}$ \\
+  Ambang batas & Persentil P0,16 dengan erosi FOV \\
+  Seleksi komponen & 3 komponen terhubung terbesar \\
+  Penutupan morfologis & Ellips $3 \times 3$, 1 iterasi \\
+  \midrule
+  \textbf{Hasil Dice (set pengujian)} & \textbf{0,4739} \\
+  \bottomrule
+\end{tabular}
+
+\clearpage
+
+%--------------------------------------------------------------
+% LAMPIRAN 3: Distribusi Dataset Zhao2024
+%--------------------------------------------------------------
+
+\refstepcounter{lampiran}
+\addcontentsline{lamp}{lampiran}{\protect\numberline{\thelampiran}Lampiran 3\enspace
+Distribusi Lengkap Dataset Zhao2024}
+\label{lamp:dataset}
+
+\noindent\hangindent=5.6em
+\makebox[5.4em][l]{\textbf{Lampiran \thelampiran}}%
+Distribusi Lengkap Dataset Zhao2024 dan Statistik Kelompok
+
+\vspace{4pt}
+
+\noindent
+\begin{tabular}{l c c c}
+  \toprule
+  \textbf{Kelas} & \textbf{Jumlah Citra} & \textbf{Persentase} & \textbf{Jumlah Kelompok} \\
+  \midrule
+  Laser Scars & 343 & 31,2\%  & 343 (singleton) \\
+  Stage 3     & 261 & 23,7\%  & $\sim$120 \\
+  Normal      & 236 & 21,5\%  & $\sim$100 \\
+  Stage 2     & 165 & 15,0\%  & $\sim$80 \\
+  Stage 1     & 94  &  8,6\%  & $\sim$79 \\
+  \midrule
+  \textbf{Total} & \textbf{1.099} & \textbf{100\%} & \textbf{$\sim$721} \\
+  \bottomrule
+\end{tabular}
+
+\vspace{6pt}
+\noindent Catatan: jumlah kelompok merupakan perkiraan berdasarkan analisis NCC $\geq$ 0,99.
+Bekas luka laser (\textit{laser scars}) diperlakukan sebagai \textit{singleton group} karena
+tidak memiliki kecocokan di kelas lain.

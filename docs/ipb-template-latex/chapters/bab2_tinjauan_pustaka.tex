@@ -1,0 +1,187 @@
+%==============================================================
+% BAB II  TINJAUAN PUSTAKA
+%==============================================================
+
+\chapter{TINJAUAN PUSTAKA}
+
+%--------------------------------------------------------------
+\section{Retinopathy of Prematurity dan Tahapannya}
+%--------------------------------------------------------------
+
+\textit{Retinopathy of Prematurity} (ROP) adalah kelainan pembuluh darah retina yang terjadi
+pada bayi yang lahir sebelum waktunya, terutama yang lahir sebelum usia kehamilan 31 minggu
+atau dengan berat badan lahir di bawah 1.500 gram. Kondisi ini terjadi karena pembuluh darah
+retina yang belum sempat terbentuk secara lengkap di dalam kandungan kemudian tumbuh secara
+tidak normal setelah kelahiran, sebagai respons terhadap kadar oksigen yang berubah dan
+faktor pertumbuhan yang tidak seimbang \citep{Chiang2021}.
+
+Berdasarkan Klasifikasi Internasional ROP (\textit{International Classification of
+Retinopathy of Prematurity}, ICROP) yang diperbarui pada tahun 2021 \citep{Chiang2021},
+keparahan ROP dibagi ke dalam lima \textit{stage}:
+
+\begin{itemize}
+    \item \textbf{Normal}: Pembuluh darah retina berkembang secara teratur dari area \textit{optic
+    disc} ke arah pinggiran retina.
+    \item \textbf{Stage 1}: Terdapat garis batas datar (\textit{demarcation line}) yang
+    memisahkan retina yang sudah berpembuluh darah dari yang belum.
+    \item \textbf{Stage 2}: Garis batas tersebut menebal dan terangkat membentuk tonjolan
+    jaringan (\textit{ridge}).
+    \item \textbf{Stage 3}: Terjadi pertumbuhan pembuluh darah baru ke arah vitreous di
+    atas \textit{ridge} (neovaskularisasi ekstraretina).
+    \item \textbf{Stage 4--5}: Ablasio retina sebagian atau menyeluruh (tidak tercakup
+    dalam penelitian ini).
+\end{itemize}
+
+Selain itu, dikenal juga kondisi \textit{plus disease} yang ditandai oleh dilatasi dan
+tortuositas pembuluh darah di kutub posterior retina, yang dapat menyertai \textit{stage}
+manapun dan menandakan penyakit yang lebih aktif \citep{Chiang2021}. Perbedaan visual antar
+\textit{stage} awal, khususnya antara \textit{Stage} 1 dan \textit{Stage} 2, sangat halus
+sehingga membutuhkan keahlian khusus dan pengalaman klinis yang tinggi \citep{Vahidmoghadam2026}.
+Ilustrasi setiap \textit{stage} ditunjukkan pada Gambar \ref{fig:rop_stages_diagram}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{images/rop_stages_diagram}
+  \caption{Empat kategori kelas retina pada klasifikasi ROP: Normal, Stage 1 dengan \textit{demarcation
+  line}, Stage 2 dengan \textit{ridge}, dan Stage 3 dengan neovaskularisasi ekstraretina.
+  Sumber: dokumentasi proyek}
+  \label{fig:rop_stages_diagram}
+\end{figure}
+
+%--------------------------------------------------------------
+\section{Dataset Citra Fundus ROP}
+%--------------------------------------------------------------
+
+Kemajuan dalam klasifikasi ROP berbasis komputer sangat bergantung pada ketersediaan dataset
+citra yang berlabel dan berkualitas baik. \citet{Zhao2024} menerbitkan dataset citra fundus ROP
+pertama yang bersifat publik dengan skala besar, yang terdiri dari 1.099 citra fundus bayi
+prematur yang dikumpulkan dari rumah sakit di Tiongkok menggunakan kamera RetCam. Dataset ini
+mencakup lima kategori: Normal (236 citra), Stage 1 (94 citra), Stage 2 (165 citra), Stage 3
+(261 citra), dan bekas luka laser (343 citra). Setiap citra dilengkapi dengan label \textit{stage}
+yang ditentukan oleh dokter spesialis mata berpengalaman. Dataset ini juga disertai dengan model
+\textit{benchmark} berbasis ResNet50 pra-latih yang mencapai \textit{macro F1-score} sebesar
+0,8281 pada pengaturan 5-kelas \citep{Zhao2024}.
+
+Dataset sekunder yang digunakan dalam penelitian ini adalah HVDROPDB dari \citet{Agrawal2021},
+khususnya bagian HVDROPDB-BV yang menyediakan 100 pasang citra fundus bayi beserta masker
+pembuluh darah yang dianotasi secara manual. Dataset ini mencakup 50 citra dari kamera RetCam
+dan 50 citra dari kamera Neo, sehingga mencerminkan variasi perangkat pengambilan gambar yang
+umum digunakan dalam skrining ROP.
+
+%--------------------------------------------------------------
+\section{Praproses dan \textit{Enhancement} Citra Fundus}
+%--------------------------------------------------------------
+
+Kualitas citra fundus bayi umumnya lebih rendah dibanding citra fundus orang dewasa karena
+berbagai faktor teknis dan kondisi pasien. Pencahayaan yang tidak merata, refleksi kornea yang
+kuat, dan kontras yang rendah antara pembuluh darah dan jaringan sekitarnya merupakan tantangan
+utama yang perlu ditangani sebelum proses analisis otomatis \citep{Rahim2024}.
+
+\citet{Rahim2024} menunjukkan bahwa kombinasi koreksi pencahayaan adaptif dan CLAHE pada ruang
+warna L*a*b* secara signifikan meningkatkan visibilitas struktur klinis penting seperti
+\textit{demarcation line} dan \textit{ridge}. CLAHE bekerja dengan membagi citra menjadi
+blok-blok kecil dan menerapkan pemerataan histogram secara terpisah pada setiap blok, dengan
+pembatasan kliping (\textit{clip limit}) untuk mencegah penguatan berlebihan pada area homogen.
+Penggunaan ruang warna L*a*b* memungkinkan \textit{enhancement} diterapkan hanya pada komponen
+kecerahan (L*) tanpa mengubah informasi warna (a* dan b*) \citep{Rahim2024}.
+
+Normalisasi latar belakang dengan filter Gaussian berskala besar juga merupakan teknik yang
+efektif untuk mengurangi ketimpangan pencahayaan. Dengan memperkirakan distribusi pencahayaan
+menggunakan filter Gaussian berukuran besar, kemudian membaginya dengan distribusi tersebut,
+variasi kecerahan antar area citra dapat dikurangi secara substansial tanpa merusak informasi
+detail lokal \citep{Almeida2024}.
+
+%--------------------------------------------------------------
+\section{Segmentasi Pembuluh Darah Retina}
+%--------------------------------------------------------------
+
+Segmentasi pembuluh darah retina secara otomatis adalah langkah praproses yang penting dalam
+analisis citra fundus untuk berbagai penyakit, termasuk ROP. Pembuluh darah retina memiliki
+karakteristik geometris yang khas, yaitu struktur \textit{tubular} dengan intensitas yang lebih
+rendah dibanding jaringan sekitarnya pada kanal hijau citra RGB.
+
+\subsection{Metode Berbasis Filter Spasial}
+
+Pendekatan berbasis filter spasial memanfaatkan karakteristik geometris pembuluh darah untuk
+membedakannya dari latar belakang. Filter Gabor multiskala dan multiorientasi terbukti efektif
+dalam mendeteksi struktur tubular pada berbagai orientasi. Filter ini merespons secara kuat
+terhadap tepi berarah yang merupakan ciri khas pembuluh darah retina \citep{Khandouzi2022}.
+
+Filter berbasis matriks Hessian, seperti filter Frangi, Sato, dan Meijering, memanfaatkan
+nilai eigen dari matriks Hessian orde dua untuk mengukur derajat \textit{vesselness} pada
+setiap piksel. Filter Meijering, yang dikembangkan oleh \citet{Meijering2004} untuk pelacakan
+filamen neurit dalam citra fluoresensi, dirancang khusus untuk mendeteksi struktur filamen tipis
+dan terbukti bekerja lebih baik pada pembuluh darah yang halus dibanding filter Frangi
+\citep{Tian2021}. \citet{Almeida2024} menunjukkan bahwa kombinasi filter berbasis Hessian
+dengan teknik \textit{top-hat} morfologis mampu menghasilkan peta \textit{vesselness} dengan
+respons yang kuat pada struktur tubular tanpa memicu terlalu banyak deteksi palsu.
+
+\subsection{Pendekatan Fusi Multi-Detektor}
+
+Penelitian terbaru menunjukkan bahwa menggabungkan respons dari beberapa jenis detektor dapat
+meningkatkan kualitas segmentasi secara lebih efektif daripada mengoptimalkan satu detektor
+saja. Filter Gabor lebih baik dalam mendeteksi pembuluh darah besar yang lebih tebal, sementara
+filter berbasis Hessian seperti Meijering lebih sensitif terhadap pembuluh darah kecil yang
+tipis. Fusi keduanya dengan pembobotan yang tepat dapat menghasilkan peta segmentasi yang
+mencakup rentang ukuran pembuluh darah yang lebih luas \citep{Almeida2024}.
+
+%--------------------------------------------------------------
+\section{Klasifikasi ROP Berbasis \textit{Deep Learning}}
+%--------------------------------------------------------------
+
+Penggunaan jaringan saraf tiruan untuk analisis citra medis ROP telah berkembang pesat dalam
+beberapa tahun terakhir. \citet{Zhang2021} melakukan tinjauan sistematis dan meta-analisis
+terhadap 24 penelitian tentang penggunaan algoritma \textit{deep learning} untuk mendeteksi
+ROP dari citra fundus, dan menemukan bahwa sebagian besar model mencapai akurasi di atas 90\%
+untuk tugas biner (ROP vs. Normal), namun performa turun secara signifikan pada tugas
+klasifikasi multi-\textit{stage}.
+
+\citet{Tong2020} mengembangkan sistem berbasis CNN untuk identifikasi otomatis ROP dan mengujinya
+pada dataset klinis dari rumah sakit di Tiongkok. Model mereka mencapai sensitivitas dan
+spesifisitas yang tinggi untuk deteksi ROP membutuhkan terapi, namun tidak membahas secara
+detail performa per-\textit{stage}.
+
+\citet{Vahidmoghadam2026} mengusulkan pendekatan yang menggabungkan informasi citra dengan
+masker pembuluh darah untuk mendeteksi \textit{plus disease} dan \textit{stage} awal ROP secara
+bersamaan. Penelitian ini menunjukkan bahwa informasi vaskular yang disajikan sebagai masukan
+tambahan dapat meningkatkan kemampuan model dalam membedakan \textit{stage} yang secara visual
+sangat mirip.
+
+\subsection{Jaringan Residual (\textit{Residual Network})}
+
+Arsitektur jaringan saraf dengan \textit{residual connection} yang diperkenalkan oleh
+\citet{He2016} merupakan fondasi dari sebagian besar model \textit{deep learning} modern.
+\textit{Residual connection} memungkinkan sinyal gradien mengalir langsung dari lapisan yang
+lebih dalam ke lapisan yang lebih dangkal selama pelatihan, sehingga mengatasi masalah
+\textit{vanishing gradient} dan memungkinkan pelatihan jaringan yang jauh lebih dalam. Untuk
+dataset medis berukuran kecil, varian ResNet yang lebih kecil (\textit{tiny}) lebih sesuai
+karena memiliki jumlah parameter yang lebih sedikit sehingga risiko \textit{overfitting} lebih
+rendah.
+
+\subsection{Penanganan Ketidakseimbangan Kelas}
+
+Ketidakseimbangan jumlah sampel antar kelas merupakan masalah umum dalam dataset medis.
+Pada dataset Zhao2024, perbandingan antara kelas terbanyak (bekas luka laser: 343 sampel) dan
+kelas paling sedikit (Stage 1: 94 sampel) hampir mencapai 4:1. \citet{Lin2017} mengusulkan
+\textit{focal loss} sebagai alternatif \textit{cross-entropy} standar yang secara otomatis
+mengurangi bobot pada sampel yang mudah diklasifikasikan sehingga pelatihan lebih berfokus pada
+sampel yang sulit, yang biasanya merupakan sampel dari kelas minoritas. Pendekatan berbasis
+ensemble seperti \textit{Random Forest} juga mendukung mekanisme pembobotan kelas secara
+native \citep{Breiman2001}.
+
+Selain itu, pemberian bobot kelas berbanding terbalik dengan frekuensinya (\textit{inverse
+frequency weighting}) merupakan teknik sederhana namun efektif untuk mengatasi
+ketidakseimbangan kelas \citep{Lin2017}. Teknik ini memastikan bahwa kesalahan pada kelas
+minoritas mendapat penalti yang lebih besar selama pelatihan.
+
+\subsection{Validasi Silang yang Sadar Kelompok (\textit{Group-Aware Cross-Validation})}
+
+Estimasi performa model yang andal membutuhkan protokol validasi yang tepat. Pada dataset
+citra medis, satu pasien atau satu mata dapat menghasilkan banyak citra yang sangat mirip.
+Apabila data dibagi secara acak pada tingkat citra, citra dari mata yang sama berpotensi masuk
+ke sisi pelatihan sekaligus sisi pengujian, sehingga model dapat mengenali identitas pasien
+alih-alih mempelajari fitur penyakit dan estimasi performa menjadi terlalu optimis.
+\textit{Group-aware cross-validation} (\textit{GroupKFold}) mengatasi risiko ini dengan
+memastikan seluruh citra dari kelompok yang sama selalu berada di sisi yang sama selama
+validasi silang, sehingga performa yang dilaporkan mencerminkan kemampuan generalisasi model
+terhadap pasien yang benar-benar belum pernah dilihat \citep{Zhao2024}.

@@ -1,0 +1,327 @@
+%==============================================================
+% BAB IV  HASIL DAN PEMBAHASAN
+%==============================================================
+
+\chapter{HASIL DAN PEMBAHASAN}
+
+%--------------------------------------------------------------
+\section{Hasil Segmentasi Pembuluh Darah}
+%--------------------------------------------------------------
+
+\subsection{Kemajuan Optimasi Pipeline}
+
+Optimasi pipeline segmentasi pembuluh darah dilakukan melalui serangkaian percobaan ablasi
+yang sistematis. Konfigurasi dasar (\textit{baseline}) menggunakan filter Gabor standar dengan
+dua tahap CLAHE, menghasilkan nilai Dice 0,4469 pada set pengujian. Setiap percobaan berikutnya
+menguji satu perubahan utama terhadap pipeline, sehingga kontribusi masing-masing komponen dapat
+diidentifikasi secara terpisah.
+
+Dua faktor utama memberikan peningkatan terbesar terhadap nilai Dice:
+
+\begin{itemize}
+    \item \textbf{Preprocessing top-hat}: Penambahan filter \textit{top-hat}
+    morfologis sebelum filter Gabor memberikan peningkatan Dice sebesar +0,0131 (dari 0,4469
+    menjadi 0,4600). Filter \textit{top-hat} mempertajam struktur gelap pembuluh darah
+    terhadap latar belakang sebelum filter Gabor bekerja, sehingga respons Gabor terhadap
+    pembuluh darah menjadi lebih kuat.
+    \item \textbf{Fusi Gabor + Meijering}: Penggantian detektor tunggal dengan
+    fusi dua detektor---Gabor untuk pembuluh besar dan Meijering untuk pembuluh tipis---memberikan
+    peningkatan tambahan sebesar +0,0139 hingga mencapai nilai Dice akhir 0,4739. Ini adalah
+    nilai Dice tertinggi yang dicapai dalam seluruh proses optimasi.
+\end{itemize}
+
+Konfigurasi terbaik \textit{g40\_m60\_fine} dengan formula $0{,}40 \times \text{gabor\_tophat} +
+0{,}60 \times \text{meijering\_fine}$ kemudian dijadikan sebagai sumber kanal pembuluh darah
+dalam skenario masukan S5.
+
+\subsection{Temuan Penting: Dice Segmentasi $\neq$ Performa Klasifikasi}
+
+Sebuah temuan penting yang diperoleh selama proses penelitian adalah bahwa memaksimalkan nilai
+Dice segmentasi pembuluh darah tidak secara otomatis meningkatkan performa klasifikasi
+\textit{stage}. Ketika konfigurasi Dice-optimal (\textit{g40\_m60\_fine}, Dice = 0,4739) digunakan
+sebagai masukan CNN pada percobaan awal, performa model
+justru turun dibanding menggunakan peta Gabor sederhana tanpa fusi Meijering. Penurunan
+terbesar terlihat pada Stage 3, dengan F1 turun dari 0,85 menjadi 0,79.
+
+Hal ini karena fusi Meijering yang dirancang untuk memaksimalkan tumpang tindih dengan masker
+pembuluh darah sebenarnya menghaluskan peta spasial yang memuat informasi khas setiap
+\textit{stage}, khususnya tekstur tepi yang membedakan Stage 2 dari Stage 3. Temuan ini
+menunjukkan bahwa optimasi segmentasi dan optimasi klasifikasi adalah dua tugas yang berbeda
+dan tidak bisa diasumsikan searah.
+
+%--------------------------------------------------------------
+\section{Hasil Baseline Klasik}
+%--------------------------------------------------------------
+
+\subsection{Perbandingan Antar Pengklasifikasi}
+
+Baseline klasik menggunakan 48 fitur rekayasa manual dari peta pembuluh darah dan area tepi.
+Evaluasi dilakukan menggunakan validasi silang 5-\textit{fold} yang distratifikasi pada 756
+citra (kelas Stage 1, Stage 2, Stage 3 dari Zhao2024). Hasil perbandingan antar pengklasifikasi
+ditunjukkan pada Tabel \ref{tab:klasik_perbandingan}.
+
+\begin{table}[H]
+\centering
+\caption{Perbandingan \textit{macro F1-score} antar pengklasifikasi pada baseline klasik
+(3 kelas: Stage 1, Stage 2, Stage 3)}
+\label{tab:klasik_perbandingan}
+\begin{tabular}{l c}
+\toprule
+\textbf{Pengklasifikasi} & \textbf{Macro F1} \\
+\midrule
+SVM (kernel RBF)           & 0,4964 \\
+\textbf{Random Forest}     & \textbf{0,5147} \\
+Gradient Boosting          & 0,4912 \\
+\midrule
+Baseline hanya fitur pembuluh darah & 0,4740 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{Random Forest} menghasilkan \textit{macro F1-score} terbaik sebesar 0,5147 dengan
+konfigurasi 400 pohon keputusan dan bobot kelas seimbang. Penambahan 12 fitur area tepi
+(\textit{ridge}) ke dalam 36 fitur pembuluh darah memberikan peningkatan nyata sebesar +0,041
+(dari 0,474 menjadi 0,5147).
+
+\subsection{Pentingnya Fitur Area Tepi}
+
+Analisis tingkat kepentingan fitur (\textit{feature importance}) pada model \textit{Random
+Forest} menunjukkan bahwa empat fitur area tepi masuk ke dalam 12 besar fitur terpenting,
+seperti ditunjukkan pada Tabel \ref{tab:feature_importance}.
+
+\begin{table}[H]
+\centering
+\caption{Dua belas fitur terpenting pada model \textit{Random Forest}}
+\label{tab:feature_importance}
+\begin{tabular}{l c}
+\toprule
+\textbf{Fitur} & \textbf{Tingkat Kepentingan} \\
+\midrule
+tortuosity\_proxy         & 0,0427 \\
+comp\_size\_std           & 0,0328 \\
+vessel\_anisotropy        & 0,0325 \\
+int\_r\_std               & 0,0286 \\
+\textbf{ridge\_main\_area}     & \textbf{0,0283} \\
+\textbf{ridge\_main\_len}      & \textbf{0,0274} \\
+\textbf{ridge\_main\_extent}   & \textbf{0,0267} \\
+soft\_std                 & 0,0266 \\
+comp\_size\_max           & 0,0260 \\
+glcm\_correlation\_std    & 0,0258 \\
+\textbf{ridge\_resp\_p95}      & \textbf{0,0247} \\
+vessel\_density           & 0,0243 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Nilai-nilai ini mengonfirmasi bahwa fitur area tepi (\textit{ridge}) memberikan
+kontribusi nyata dalam membedakan \textit{stage} ROP, khususnya antara Stage 2 (yang ditandai
+\textit{ridge}) dan Stage lainnya.
+
+\subsection{Batas Atas Performa Klasik: Hambatan Stage 1}
+
+Meskipun penambahan fitur tepi meningkatkan performa secara keseluruhan, F1-score untuk Stage
+1 hampir tidak bergerak dari rentang 0,30--0,31 pada seluruh konfigurasi yang dicoba. Analisis
+menunjukkan bahwa filter tepi klasik hanya mampu mendeteksi sekitar 37\% piksel \textit{demarcation
+line} yang sebenarnya. Garis batas yang tipis dan berkontras rendah pada Stage 1 merupakan
+struktur yang paling sulit dideteksi oleh filter berbasis aturan tanpa kemampuan belajar
+adaptif.
+
+%--------------------------------------------------------------
+\section{Hasil Klasifikasi dengan Jaringan Saraf Tiruan}
+%--------------------------------------------------------------
+
+\subsection{Ringkasan Hasil Eksperimen}
+
+Eksperimen jaringan saraf tiruan dilakukan secara bertahap, dengan setiap konfigurasi
+membangun di atas hasil konfigurasi sebelumnya. Tabel \ref{tab:hasil_keseluruhan} merangkum
+seluruh hasil yang diperoleh. Seluruh model jaringan saraf dievaluasi menggunakan protokol
+\textit{group-aware cross-validation} (\textit{StratifiedGroupKFold} 5-\textit{fold}) yang
+diterapkan secara konsisten sejak awal agar seluruh citra dari mata yang sama berada pada
+\textit{fold} yang sama (lihat Subbab \ref{subsec:group_aware}).
+
+\begin{table}[H]
+\centering
+\caption{Ringkasan hasil eksperimen klasifikasi}
+\label{tab:hasil_keseluruhan}
+\begin{tabular}{l l c l}
+\toprule
+\textbf{Eksperimen} & \textbf{Input} & \textbf{Macro F1} & \textbf{Catatan} \\
+\midrule
+CNN awal (raw RGB)          & RGB 3-kanal & 0,45  & Tanpa pra-latih \\
+Baseline klasik terbaik     & 48 fitur    & 0,5147 & RF, 3 kelas \\
+CNN RGB (group-aware)       & RGB 3-kanal & 0,6866 & Baseline CNN \\
+\textbf{CNN softmap (group-aware)} & \textbf{Softmap} & \textbf{0,7853} & \textbf{Terbaik} \\
+CNN + kalibrasi Stage1      & Softmap     & 0,8018 & Kalibrasi pasca-hoc \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Protokol Evaluasi \textit{Group-Aware}}
+\label{subsec:group_aware}
+
+Pemilihan protokol evaluasi merupakan keputusan metodologis yang menentukan kredibilitas
+seluruh estimasi performa. Dataset ROP yang digunakan memiliki dua karakteristik yang
+menuntut pembagian data dilakukan pada tingkat kelompok mata, bukan pada tingkat citra
+individual:
+
+\begin{enumerate}
+    \item \textbf{Duplikat byte-identik}: Terdapat 12 berkas citra yang persis sama dalam 6
+    kelompok, termasuk tiga pasang dengan label kelas yang berbeda (konflik label). Duplikat
+    semacam ini dapat muncul di kedua sisi batas pelatihan--pengujian secara bersamaan.
+    \item \textbf{Citra satu mata}: Beberapa citra berasal dari mata yang sama tetapi dicatat
+    sebagai berkas terpisah. Analisis \textit{normalized cross-correlation} (NCC $\geq$ 0,99)
+    mengidentifikasi sekitar 63 pasang citra hampir-duplikat. Pembagian data pada tingkat citra
+    akan membiarkan citra dari mata yang sama masuk ke pelatihan dan pengujian sekaligus,
+    sehingga model dapat mengidentifikasi mata---bukan penyakitnya.
+\end{enumerate}
+
+Untuk mengatasi kedua karakteristik tersebut, seluruh eksperimen klasifikasi jaringan saraf
+menggunakan \textit{StratifiedGroupKFold} 5-\textit{fold}, di mana seluruh citra dari satu
+kelompok mata ditempatkan pada \textit{fold} yang sama. Protokol ini menghasilkan estimasi
+performa yang lebih jujur dan dapat dipercaya, meskipun nilainya secara absolut lebih rendah
+dibanding pembagian tingkat citra. Estimasi yang konservatif namun valid
+ini lebih bermakna secara klinis dibanding angka tinggi yang tidak dapat digeneralisasikan.
+
+\subsection{Hasil Terbaik: TinyResNetV2 dengan Masukan Softmap}
+
+Model dengan performa terbaik adalah \textit{TinyResNetV2} yang dilatih dari awal menggunakan
+masukan tiga kanal softmap, dievaluasi dengan \textit{StratifiedGroupKFold} 5-\textit{fold}.
+Hasil lengkap ditunjukkan pada Tabel \ref{tab:hasil_terbaik}.
+
+\begin{table}[H]
+\centering
+\caption{Hasil model terbaik: \textit{TinyResNetV2} dengan masukan softmap (group-aware CV)}
+\label{tab:hasil_terbaik}
+\begin{tabular}{l c}
+\toprule
+\textbf{Metrik} & \textbf{Nilai} \\
+\midrule
+OOF Macro F1-score        & \textbf{0,7853} \\
+OOF Akurasi               & 0,8317 \\
+OOF Macro Precision       & 0,7867 \\
+OOF Macro Recall          & 0,8028 \\
+\midrule
+F1 per-fold (5 fold) & 0,7747 / 0,7881 / 0,7597 / 0,7834 / 0,8203 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Performa per-kelas ditunjukkan pada Tabel \ref{tab:performa_per_kelas}.
+
+\begin{table}[H]
+\centering
+\caption{Performa per kelas model terbaik (OOF, group-aware)}
+\label{tab:performa_per_kelas}
+\begin{tabular}{l c c c c}
+\toprule
+\textbf{Kelas} & \textbf{Presisi} & \textbf{Recall} & \textbf{F1} & \textbf{Jumlah} \\
+\midrule
+Normal       & 0,95 & 0,90 & 0,93 & 236 \\
+Stage 1      & 0,45 & 0,77 & 0,57 & 94  \\
+Stage 2      & 0,70 & 0,61 & 0,65 & 165 \\
+Stage 3      & 0,83 & 0,82 & 0,83 & 261 \\
+Laser Scars  & 1,00 & 0,92 & 0,96 & 343 \\
+\midrule
+\textbf{Macro} & \textbf{0,79} & \textbf{0,80} & \textbf{0,79} & \textbf{1.099} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Visualisasi matriks konfusi model terbaik ditunjukkan pada Gambar \ref{fig:confusion_matrix}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{images/confusion_matrix_champion}
+  \caption{Matriks konfusi model terbaik \textit{TinyResNetV2} dengan masukan softmap dan
+  evaluasi \textit{group-aware} 5-\textit{fold} pada 1.099 citra}
+  \label{fig:confusion_matrix}
+\end{figure}
+
+%--------------------------------------------------------------
+\section{Pembahasan}
+%--------------------------------------------------------------
+
+\subsection{Peningkatan yang Dikontrol: Representasi Softmap vs. RGB}
+
+Percobaan ablasi yang paling bisa dipercaya dalam penelitian ini adalah perbandingan langsung
+antara masukan RGB mentah dan masukan softmap pada model, data, protokol, dan hyperparameter
+yang identik---satu-satunya variabel yang berbeda adalah representasi input. Hasil perbandingan
+ditunjukkan pada Gambar \ref{fig:hasil_perbandingan}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{images/results_comparison_chart}
+  \caption{Perbandingan \textit{macro F1-score} seluruh konfigurasi yang dievaluasi. Bar
+  yang disorot menunjukkan model terbaik}
+  \label{fig:hasil_perbandingan}
+\end{figure}
+
+Masukan softmap menghasilkan \textit{macro F1-score} 0,7853 dibanding 0,6866 untuk masukan
+RGB pada model yang sama, menunjukkan peningkatan terkontrol sebesar \textbf{+0,0987}. Peningkatan
+ini sepenuhnya dapat dikaitkan dengan perbedaan representasi input, karena tidak ada variabel
+lain yang berubah. Ini membuktikan secara langsung bahwa informasi spasial pembuluh darah
+dan area tepi yang dikodekan dalam softmap lebih berguna bagi jaringan saraf dibanding nilai
+piksel RGB mentah.
+
+\subsection{Hambatan pada Stage 1 dan Stage 2}
+
+Kelas Stage 1 dan Stage 2 tetap menjadi tantangan terbesar dalam klasifikasi. Stage 1
+mencapai F1-score 0,57 dengan presisi rendah (0,45) namun recall tinggi (0,77), menunjukkan
+bahwa model cenderung terlalu sering memprediksi Stage 1. Banyak sampel Stage 2 yang
+diprediksi sebagai Stage 1, yang merupakan \textit{adjacent-class confusion}---kesalahan yang
+dapat dipahami karena Stage 1 dan Stage 2 berbeda hanya dalam tingkat ketebalan \textit{ridge}
+yang secara visual sangat mirip.
+
+Stage 2 mencapai F1-score 0,65 dengan recall yang lebih rendah (0,61), menunjukkan sebagian
+sampel Stage 2 yang bocor ke Stage 1 (nilai rendah, bergabung dengan prediksi Stage 1 yang
+berlebih) dan Stage 3 (nilai tinggi). Pola ini konsisten dengan karakteristik penyakit: Stage 2
+adalah kondisi \textit{transisi} antara Stage 1 dan Stage 3, sehingga batas keputusannya
+secara alami lebih tidak jelas.
+
+\subsection{Pendekatan yang Tidak Efektif}
+
+Penelitian ini secara eksplisit mendokumentasikan dua pendekatan yang telah dicoba dan terbukti
+tidak efektif:
+
+\textbf{(1) Ordinal smoothing (v3)}: Hipotesis bahwa memperlakukan \textit{stage} sebagai
+variabel ordinal (Stage 1 $<$ Stage 2 $<$ Stage 3) dengan menggunakan \textit{ordinal neighbor
+smoothing} (ONSCE, $\epsilon = 0{,}15$) akan mengurangi kesalahan antar-\textit{stage} yang
+berdekatan. Hasilnya menunjukkan sebaliknya: pada percobaan ablasi 2$\times$2 yang terkontrol,
+penambahan \textit{ordinal smoothing} ke model v2 justru menurunkan \textit{macro F1} sebesar
+0,055. \textit{Recall} Stage 1 yang ditarget untuk ditingkatkan justru turun dari 0,57 menjadi
+0,51. Pendekatan ini dinyatakan gagal.
+
+\textbf{(2) Oversampling Stage 1}: Hipotesis bahwa memperbanyak sampel Stage 1 (n=94) dalam
+setiap \textit{batch} menggunakan \textit{WeightedRandomSampler} dengan faktor $\times$3 akan
+memperbaiki F1-score Stage 1. Hasilnya: pada dua fold yang dijalankan, performa turun dari
+0,778 menjadi 0,717 dan dari 0,773 menjadi 0,684. Masalah pada Stage 1 bukan kekurangan
+eksposur (\textit{recall} sudah 0,77), melainkan terlalu banyak prediksi palsu positif
+(\textit{precision} hanya 0,45). Oversampling memperburuk ketidakseimbangan ini. Pendekatan
+ini dinyatakan gagal.
+
+Pelajaran dari kedua kegagalan ini adalah bahwa masalah Stage 1--Stage 2 merupakan konfusi
+yang disebabkan oleh kesamaan visual antar kelas yang berdekatan secara klinis. Solusi yang
+mungkin efektif adalah pendekatan yang dapat mengurangi prediksi palsu positif Stage 1 secara
+spesifik, bukan pendekatan yang memperbesar sinyal Stage 1 secara global.
+
+\subsection{Keterbatasan Penelitian}
+
+Beberapa keterbatasan penting perlu dicatat:
+
+\begin{itemize}
+    \item \textbf{Tidak ada identitas pasien yang terverifikasi}: Pengelompokan berdasarkan NCC
+    merupakan pendekatan terbaik yang tersedia mengingat tidak adanya ID pasien dalam nama
+    berkas. Meskipun ini mengurangi risiko tumpang tindih antar himpunan data, hasilnya tidak
+    dapat dijamin setara dengan pembagian berbasis pasien yang terverifikasi.
+    \item \textbf{Dataset tunggal}: Seluruh eksperimen dilakukan pada dataset Zhao2024 dari
+    satu negara dan jenis kamera yang dominan. Kemampuan generalisasi ke dataset dari kamera
+    berbeda atau populasi yang berbeda belum diuji.
+    \item \textbf{Tidak ada bobot pra-latih}: Keputusan untuk tidak menggunakan bobot pra-latih
+    (karena kanal masukan adalah softmap, bukan RGB) berarti penelitian ini tidak dapat
+    memanfaatkan pengetahuan visual umum yang telah dipelajari dari dataset berskala besar.
+    Ini adalah pertukaran (\textit{trade-off}) yang disengaja dan terdokumentasi.
+    \item \textbf{Batas atas Stage 1}: F1-score Stage 1 sebesar 0,57 masih jauh di bawah
+    kelas lainnya. Meningkatkan performa Stage 1 memerlukan penelitian lebih lanjut, mungkin
+    dengan menggunakan model segmentasi yang dapat dipelajari (\textit{learned segmenter})
+    seperti U-Net \citep{Ronneberger2015} untuk menghasilkan peta tepi yang lebih akurat.
+\end{itemize}

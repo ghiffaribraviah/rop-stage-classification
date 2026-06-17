@@ -1,0 +1,341 @@
+%==============================================================
+% BAB III  METODE
+%==============================================================
+
+\chapter{METODE}
+
+%--------------------------------------------------------------
+\section{Data dan Strategi Pembagian Data}
+%--------------------------------------------------------------
+
+\subsection{Dataset Utama: Zhao2024}
+
+Dataset utama yang digunakan dalam penelitian ini adalah koleksi citra fundus bayi yang
+diterbitkan oleh \citet{Zhao2024}, selanjutnya disebut Zhao2024. Dataset ini terdiri dari
+1.099 citra fundus bayi prematur dalam lima kelas: Normal, Stage 1, Stage 2, Stage 3, dan
+bekas luka laser (\textit{laser scars}). Rincian distribusi kelas ditunjukkan pada Tabel
+\ref{tab:distribusi_kelas}.
+
+\begin{table}[H]
+\centering
+\caption{Distribusi kelas pada dataset Zhao2024}
+\label{tab:distribusi_kelas}
+\begin{tabular}{l c}
+\toprule
+\textbf{Kelas} & \textbf{Jumlah Citra} \\
+\midrule
+Normal            & 236  \\
+Stage 1           & 94   \\
+Stage 2           & 165  \\
+Stage 3           & 261  \\
+Laser Scars       & 343  \\
+\midrule
+\textbf{Total}    & \textbf{1.099} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Analisis mendalam terhadap dataset menemukan adanya 12 citra yang identik secara byte
+(\textit{byte-identical duplicates}) dalam 6 kelompok duplikat. Yang lebih penting, tiga
+dari kelompok tersebut merupakan konflik label antar-kelas: citra yang persis sama tercatat
+di bawah dua kelas yang berbeda. Pasangan yang teridentifikasi adalah \textit{Stage\_2\_ROP\_154.jpg}
+$\equiv$ \textit{Stage\_3\_ROP\_210.jpg}, \textit{Stage\_2\_ROP\_52.jpg} $\equiv$
+\textit{Stage\_3\_ROP\_254.jpg}, dan \textit{Stage\_1\_ROP\_42.jpg} $\equiv$
+\textit{Stage\_2\_ROP\_4.jpg}. Duplikat ini dibiarkan ada dalam dataset dan ditangani melalui
+protokol pengelompokan (\textit{grouping}), bukan dengan menghapus data.
+
+\subsection{Dataset Sekunder: Agrawal2021}
+
+Dataset sekunder yang digunakan adalah bagian HVDROPDB-BV dari dataset yang diterbitkan oleh
+\citet{Agrawal2021}. Dataset ini terdiri dari 100 pasang citra fundus bayi beserta masker
+pembuluh darah yang dianotasi oleh pakar, yang terbagi atas 50 citra dari kamera RetCam dan
+50 citra dari kamera Neo. Dataset ini digunakan semata-mata untuk mengevaluasi kualitas
+pipeline segmentasi pembuluh darah secara kuantitatif menggunakan metrik Dice dan tidak
+terlibat dalam pelatihan atau pengujian model klasifikasi.
+
+\subsection{Strategi Pembagian Data dan Pengelompokan}
+
+Karena dataset Zhao2024 tidak menyediakan identitas pasien pada nama file, pembagian data
+secara langsung berbasis identitas pasien tidak dapat dilakukan. Sebagai solusi, analisis
+kemiripan antar citra menggunakan korelasi silang ternormalisasi (\textit{Normalized Cross-
+Correlation}, NCC $\geq$ 0,99) dilakukan untuk mendeteksi pasangan citra yang berasal dari
+mata yang sama. Proses ini menghasilkan 721 kelompok dari total 1.099 citra yang kemudian
+disimpan dalam berkas \textit{clean\_manifest.json}.
+
+Validasi silang 5-\textit{fold} menggunakan \textit{StratifiedGroupKFold} diterapkan agar
+setiap kelompok selalu berada sepenuhnya di satu sisi batas pelatihan--pengujian. Strategi ini
+memastikan bahwa model benar-benar mempelajari pola penyakit, bukan pola citra dari mata
+tertentu.
+
+%--------------------------------------------------------------
+\section{Pipeline Segmentasi Pembuluh Darah}
+%--------------------------------------------------------------
+
+Pipeline segmentasi pembuluh darah dirancang berdasarkan prinsip detektor berbasis filter
+klasik tanpa komponen \textit{deep learning}. Pipeline ini dioptimalkan melalui serangkaian
+percobaan terkontrol menggunakan dataset HVDROPDB-BV, dengan evaluasi menggunakan nilai Dice
+pada set pengujian yang terpisah (40\% dari 100 citra). Gambar \ref{fig:vessel_segmentation_rounds}
+menunjukkan kemajuan nilai Dice sepanjang proses optimasi.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\linewidth]{images/vessel_segmentation_rounds}
+  \caption{Kemajuan nilai Dice segmentasi pembuluh darah sepanjang proses optimasi. Konfigurasi
+  terbaik \textit{g40\_m60\_fine} mencapai Dice = 0,4739}
+  \label{fig:vessel_segmentation_rounds}
+\end{figure}
+
+\subsection{Konfigurasi Optimal: \textit{g40\_m60\_fine}}
+
+Hasil terbaik dicapai melalui fusi dua detektor dengan formula:
+\begin{equation}
+  \text{softmap} = 0{,}40 \times \text{gabor\_tophat} + 0{,}60 \times \text{meijering\_fine}
+  \label{eq:softmap}
+\end{equation}
+
+\noindent Langkah-langkah pemrosesan adalah sebagai berikut:
+
+\begin{enumerate}
+    \item \textbf{Praproses kanal hijau}: Kanal hijau diekstrak dari citra RGB. Piksel di
+    luar area \textit{field of view} (FOV) diisi menggunakan nilai piksel FOV terdekat untuk
+    mencegah artefak pada tahap filtering berikutnya.
+    \item \textbf{Normalisasi latar belakang}: Latar belakang diperkirakan menggunakan filter
+    Gaussian berskala besar ($\sigma \approx$ 30 piksel). Kanal hijau dibagi dengan perkiraan
+    latar belakang tersebut untuk meratakan pencahayaan.
+    \item \textbf{CLAHE pertama}: CLAHE dengan \textit{clip limit} 6,0 dan ukuran \textit{tile}
+    $16 \times 16$ diterapkan pada kanal hijau yang sudah dinormalisasi.
+    \item \textbf{Preprocessing top-hat}: Filter \textit{top-hat} morfologis diterapkan pada
+    kanal yang sudah diproses untuk mempertajam struktur pembuluh darah gelap sebelum filtering
+    Gabor.
+    \item \textbf{Filter Gabor multiskala}: Bank filter Gabor multiskala (sigma: 1,5; 2,5; 3,5;
+    5,0 piksel) dan multiorientasi (15 sudut dari $0°$ hingga $165°$) diterapkan. Respons
+    maksimum dari seluruh konfigurasi diambil sebagai peta respons Gabor.
+    \item \textbf{Penghalusan dan CLAHE kedua}: Median blur $7 \times 7$ diterapkan untuk
+    mengurangi \textit{noise}, diikuti CLAHE kedua (\textit{clip limit} 12,0, tile $12 \times 12$).
+    Peta gabor\_tophat diperoleh dari tahap ini.
+    \item \textbf{Filter Meijering}: Filter Meijering dengan sigma halus (0,8; 1,4; 2,0; 2,8;
+    3,6; 4,5 piksel) diterapkan secara terpisah untuk mendeteksi pembuluh darah yang lebih tipis
+    yang terlewat oleh filter Gabor.
+    \item \textbf{Fusi dan ambang batas}: Softmap akhir dihitung menggunakan persamaan
+    \ref{eq:softmap}. Binarisasi menggunakan ambang persentil P0,16 dengan erosi area FOV,
+    diikuti pemilihan tiga komponen terhubung terbesar dan penutupan morfologis ($3 \times 3$).
+\end{enumerate}
+
+Proses optimasi ini dimulai dari nilai Dice dasar 0,4469 (konfigurasi awal) dan mencapai
+nilai Dice 0,4739 pada iterasi ketujuh. Ringkasan kemajuan ditunjukkan pada Tabel
+\ref{tab:vessel_progress}.
+
+\begin{table}[H]
+\centering
+\caption{Ringkasan kemajuan nilai Dice segmentasi pembuluh darah}
+\label{tab:vessel_progress}
+\begin{tabular}{l l c c}
+\toprule
+\textbf{Iterasi} & \textbf{Perubahan Utama} & \textbf{Dice (Test)} & \textbf{$\Delta$ vs Baseline} \\
+\midrule
+Baseline & Gabor + 2$\times$CLAHE + P0,16 & 0,4469 & --- \\
+1 & Optimasi ambang batas dan \textit{cleanup} & 0,4505 & +0,0036 \\
+2 & Preprocessing top-hat sebelum Gabor & 0,4600 & +0,0131 \\
+3 & Penyesuaian rasio blend top-hat & 0,4599 & (stabil) \\
+4 & Fusi Sato + Gabor & 0,4655 & +0,0186 \\
+5 & Sigma Sato yang lebih halus & 0,4667 & +0,0198 \\
+6 & Tiga cara fusi (Meijering mengganti Sato) & --- & (redudansi) \\
+\textbf{7} & \textbf{Fusi Gabor + Meijering (terbaik)} & \textbf{0,4739} & \textbf{+0,0270} \\
+8 & Konfigurasi tambahan di luar iterasi 7 & (regresi) & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%--------------------------------------------------------------
+\section{Skenario Representasi Input}
+%--------------------------------------------------------------
+
+Penelitian ini membandingkan lima skenario representasi input untuk menguji pengaruh
+berbagai bentuk pemrosesan citra terhadap performa model klasifikasi. Gambar
+\ref{fig:pipeline_diagram} menunjukkan kerangka umum pipeline penelitian.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{images/pipeline_diagram}
+  \caption{Kerangka \textit{pipeline} penelitian yang menunjukkan lima skenario input dan
+  alur pemrosesan menuju model \textit{TinyResNetV2}}
+  \label{fig:pipeline_diagram}
+\end{figure}
+
+\vspace{2mm}
+\noindent\textbf{S1: RGB Mentah (\textit{Raw RGB})}
+Citra fundus asli yang hanya diubah ukurannya menjadi $224 \times 224$ piksel dan dinormalisasi
+nilai pikselnya ke rentang $[0, 1]$. Skenario ini berfungsi sebagai \textit{baseline} mutlak
+tanpa pemrosesan tambahan apapun.
+
+\vspace{2mm}
+\noindent\textbf{S2: RGB Enhanced (CLAHE)}
+Citra yang sudah diproses menggunakan koreksi pencahayaan berbasis normalisasi Gaussian,
+diikuti CLAHE pada kanal kecerahan dalam ruang warna CIE L*a*b*. Skenario ini menguji
+apakah peningkatan kontras secara visual berkontribusi pada performa klasifikasi.
+
+\vspace{2mm}
+\noindent\textbf{S3: Vessel Mask}
+Citra biner satu kanal yang berisi hasil segmentasi pembuluh darah. Direplikasi menjadi tiga
+kanal untuk memenuhi spesifikasi input model. Skenario ini menguji apakah informasi bentuk
+dan distribusi pembuluh darah saja---tanpa tekstur retina lainnya---sudah cukup informatif.
+
+\vspace{2mm}
+\noindent\textbf{S4: Vessel-Guided Enhanced}
+Citra S2 yang dikalikan secara piksel dengan peta probabilitas halus (\textit{soft vesselness
+map}) turunan dari S3, sehingga area di sekitar pembuluh darah mendapat penekanan lebih kuat.
+Skenario ini menguji apakah penekanan konteks vaskular membantu model memfokuskan perhatiannya
+pada area yang relevan.
+
+\vspace{2mm}
+\noindent\textbf{S5: Masked Softmap (Terbaik)}
+Masukan tiga kanal yang dibentuk oleh: (1) \textit{softmap} pembuluh darah dari konfigurasi
+\textit{g40\_m60\_fine}, (2) \textit{softmap} area tepi (\textit{ridge softmap}), dan
+(3) kanal hijau ternormalisasi CLAHE yang telah di-masker FOV. Semua kanal bersifat kontinu
+(bukan biner) dan dimasker oleh FOV. Skenario ini menghasilkan performa terbaik di antara
+seluruh skenario yang diuji.
+
+%--------------------------------------------------------------
+\section{Baseline Klasik: Fitur Rekayasa Manual}
+%--------------------------------------------------------------
+
+Sebelum membangun model jaringan saraf, sebuah \textit{baseline} berbasis fitur rekayasa manual
+(\textit{handcrafted features}) dibangun untuk menetapkan batas bawah performa yang harus
+dilampaui. Baseline ini menggunakan 48 fitur yang diekstrak dari setiap citra, mencakup:
+
+\begin{itemize}
+    \item \textbf{Fitur morfologi pembuluh darah}: Kerapatan pembuluh darah (\textit{vessel
+    density}), proksi tortuositas, anisotropi pembuluh, ukuran dan standar deviasi komponen.
+    \item \textbf{Fitur tekstur}: Matriks kookurensi tingkat keabuan (\textit{Gray-Level
+    Co-occurrence Matrix}, GLCM) \citep{Khandouzi2022} yang menghasilkan fitur kontras,
+    korelasi, energi, dan homogenitas.
+    \item \textbf{Fitur statistik intensitas}: Rerata dan standar deviasi intensitas pada
+    setiap kanal warna.
+    \item \textbf{Fitur area tepi (\textit{ridge})}: Luas, panjang, kerapatan, dan persentil
+    respons dari komponen \textit{ridge} yang terdeteksi.
+\end{itemize}
+
+Fitur-fitur tersebut kemudian dimasukkan ke dalam tiga jenis model klasifikasi: \textit{Support
+Vector Machine} (SVM) dengan kernel RBF, \textit{Random Forest} \citep{Breiman2001} dengan 400
+pohon keputusan (\textit{n\_estimators=400, max\_depth=None}), dan \textit{Gradient Boosting}.
+Evaluasi dilakukan menggunakan validasi silang 5-\textit{fold} yang distratifikasi berdasarkan kelas.
+
+%--------------------------------------------------------------
+\section{Arsitektur Model Klasifikasi: TinyResNetV2}
+%--------------------------------------------------------------
+
+Model klasifikasi utama adalah \textit{TinyResNetV2}, sebuah jaringan saraf residual kecil yang
+dirancang dari awal (\textit{from scratch}) tanpa menggunakan bobot pra-latih. Arsitektur ini
+dipilih karena ukurannya yang proporsional dengan skala dataset sehingga risiko \textit{overfitting}
+dapat dikendalikan.
+
+Arsitektur \textit{TinyResNetV2} terdiri dari:
+\begin{enumerate}
+    \item Lapisan konvolusi awal $3 \times 3$ diikuti \textit{batch normalization} dan fungsi
+    aktivasi ReLU.
+    \item Tiga tahap \textit{residual block} bertingkat dengan lebar fitur masing-masing 48,
+    96, dan 192 kanal. Setiap tahap menerapkan \textit{downsampling} spasial melalui konvolusi
+    dengan \textit{stride} 2.
+    \item \textit{Global Average Pooling} untuk meringkas peta fitur dua dimensi menjadi vektor
+    satu dimensi.
+    \item Lapisan \textit{Dropout} untuk regulasi.
+    \item Lapisan \textit{Dense} dengan fungsi aktivasi \textit{softmax} untuk lima kelas.
+\end{enumerate}
+
+Struktur \textit{residual block} mengikuti pola dasarnya: \textit{conv-BN-ReLU-conv-BN} dengan
+hubungan pintas (\textit{skip connection}) yang menjumlahkan masukan blok dengan keluarannya.
+Arsitektur ini ditunjukkan pada Gambar \ref{fig:tinyresnet_arch}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.9\linewidth]{images/tinyresnet_arch}
+  \caption{Arsitektur \textit{TinyResNetV2} dengan tiga tahap \textit{residual block} dan lebar
+  kanal bertingkat (48/96/192). Hubungan pintas (\textit{skip connection}) memungkinkan gradien
+  mengalir langsung melewati setiap blok}
+  \label{fig:tinyresnet_arch}
+\end{figure}
+
+%--------------------------------------------------------------
+\section{Protokol Pelatihan}
+%--------------------------------------------------------------
+
+\subsection{Fungsi Kerugian dan Pembobotan Kelas}
+
+Pelatihan menggunakan \textit{focal loss} \citep{Lin2017} dengan parameter $\gamma = 1{,}0$
+dan bobot kelas berbanding terbalik dengan frekuensi masing-masing kelas
+(\textit{inverse-frequency class weights}). \textit{Focal loss} secara otomatis mengurangi
+kontribusi sampel yang mudah diklasifikasikan, sehingga pelatihan lebih berfokus pada sampel
+kelas minoritas yang sulit.
+
+\subsection{Optimisasi dan Penjadwalan Laju Belajar}
+
+Optimisasi menggunakan algoritma AdamW \citep{Loshchilov2019} dengan laju belajar awal
+$10^{-3}$ dan peluruhan bobot (\textit{weight decay}) $5 \times 10^{-4}$. Laju belajar
+dijadwalkan menggunakan strategi \textit{cosine annealing} selama 160 \textit{epoch}.
+
+\subsection{Augmentasi Data}
+
+Augmentasi data diterapkan selama pelatihan untuk meningkatkan variasi data latih dan
+mengurangi \textit{overfitting}. Teknik augmentasi yang digunakan meliputi:
+\begin{itemize}
+    \item \textit{MixUp} \citep{Zhang2018} ($\alpha = 0{,}2$, probabilitas 0,5 per \textit{batch}):
+    menggabungkan dua sampel dan labelnya secara linear.
+    \item \textit{CutMix} \citep{Yun2019} ($\alpha = 1{,}0$, probabilitas 0,5 per \textit{batch}):
+    menempelkan potongan gambar dari satu sampel ke sampel lain dengan label proporsional.
+    \item \textit{Label smoothing} 0,1: meratakan distribusi target agar model tidak terlalu
+    percaya diri (\textit{overconfident}) pada satu kelas.
+    \item \textit{Stochastic depth} (\textit{DropPath}) \citep{Huang2016} dengan jadwal
+    linear $0 \rightarrow 0{,}2$: menonaktifkan sebagian jalur residual secara acak
+    selama pelatihan sebagai bentuk regulasi.
+    \item \textit{Weight EMA} (\textit{Exponential Moving Average}) dengan peluruhan 0,999:
+    merata-ratakan bobot model secara eksponensial untuk mendapatkan model yang lebih stabil.
+    \item \textit{Flip test-time augmentation} pada saat inferensi OOF: prediksi dirata-ratakan
+    dari citra asli dan cerminan horizontalnya.
+\end{itemize}
+
+\subsection{Protokol Validasi Silang}
+
+Protokol utama yang digunakan adalah \textit{StratifiedGroupKFold} dengan 5 \textit{fold}.
+Pembagian ini memastikan bahwa: (1) distribusi kelas pada setiap \textit{fold} kira-kira
+proporsional, dan (2) seluruh citra dari kelompok yang sama (kelompok citra serupa yang
+terdeteksi melalui NCC) selalu berada di sisi yang sama. Prediksi \textit{out-of-fold} (OOF)
+dari kelima fold digabungkan untuk menghitung metrik evaluasi akhir.
+
+%--------------------------------------------------------------
+\section{Metrik Evaluasi}
+%--------------------------------------------------------------
+
+\subsection{Metrik Klasifikasi}
+
+Metrik utama yang digunakan adalah \textit{macro F1-score}, yaitu rata-rata dari nilai
+F1-score masing-masing kelas tanpa memperhitungkan jumlah sampel per kelas. Metrik ini dipilih
+karena ketidakseimbangan kelas pada dataset membuat akurasi keseluruhan tidak cukup informatif;
+kelas dengan sampel lebih banyak dapat mendominasi akurasi meskipun kelas minoritas
+berkinerja buruk. Formula \textit{macro F1-score} adalah:
+
+\begin{equation}
+  \text{Macro F1} = \frac{1}{K} \sum_{k=1}^{K} F1_k = \frac{1}{K} \sum_{k=1}^{K}
+  \frac{2 \cdot P_k \cdot R_k}{P_k + R_k}
+  \label{eq:macro_f1}
+\end{equation}
+
+\noindent di mana $K$ adalah jumlah kelas, $P_k$ adalah presisi, dan $R_k$ adalah \textit{recall}
+untuk kelas ke-$k$.
+
+Selain \textit{macro F1-score}, metrik tambahan yang dilaporkan mencakup akurasi keseluruhan,
+\textit{macro precision}, \textit{macro recall}, dan F1-score per kelas.
+
+\subsection{Metrik Segmentasi}
+
+Kualitas segmentasi pembuluh darah dievaluasi menggunakan \textit{Dice coefficient}
+\citep{Sorensen1948}, yang mengukur tumpang tindih antara masker prediksi dan masker
+\textit{ground truth} dari anotasi pakar. Formula \textit{Dice coefficient} adalah:
+
+\begin{equation}
+  \text{Dice} = \frac{2 \times |A \cap B|}{|A| + |B|}
+  \label{eq:dice}
+\end{equation}
+
+\noindent di mana $A$ adalah masker prediksi dan $B$ adalah masker \textit{ground truth}.
+Evaluasi dilakukan pada 40 citra set pengujian yang tidak pernah terlihat selama optimasi
+pipeline.

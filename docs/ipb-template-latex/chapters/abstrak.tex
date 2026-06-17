@@ -1,0 +1,86 @@
+%==============================================================
+% ABSTRAK DAN ABSTRACT
+%==============================================================
+
+\clearpage
+\thispagestyle{empty}
+
+% --- ABSTRAK (Bahasa Indonesia) ---
+\begin{center}
+{\fontsize{14pt}{17pt}\selectfont\bfseries ABSTRAK}
+\end{center}
+
+\vspace{6pt}
+
+\noindent
+GHIFFARI BRAVIA HISHAM, MUHAMMAD ABYAN PUTRA WIBOWO, ADAM NAUFAL,
+MOCHAMAD CHAIRULRIDJAL NURVIKRI, RAFIF MUHAMMAD FARRAS.
+Klasifikasi \textit{Stage Retinopathy of Prematurity} Berdasarkan Citra Fundus Bayi
+Menggunakan \textit{Enhancement} Citra, Segmentasi Pembuluh Darah, dan \textit{Custom} CNN.
+Mata kuliah Pengenalan Citra Digital. Dibimbing oleh NAMA DOSEN.
+
+\vspace{12pt}
+
+\noindent
+\textit{Retinopathy of Prematurity} (ROP) adalah gangguan perkembangan pembuluh darah retina
+pada bayi prematur yang berpotensi menyebabkan kebutaan jika tidak terdeteksi sejak dini.
+Penelitian ini membangun sebuah \textit{pipeline} klasifikasi \textit{stage} ROP dari citra
+fundus bayi ke lima kelas: Normal, Stage 1, Stage 2, Stage 3, dan bekas luka laser
+(\textit{laser scars}). Proses dilakukan dalam dua tahap utama, yaitu segmentasi pembuluh darah
+secara klasik dan klasifikasi berbasis jaringan saraf tiruan. Pipeline segmentasi
+menggabungkan filter Gabor multiskala dengan respons Meijering berbasis matriks Hessian
+(konfigurasi \textit{g40\_m60\_fine}), menghasilkan nilai Dice terbaik 0,4739 pada dataset
+HVDROPDB-BV. Model klasifikasi utama adalah \textit{TinyResNetV2} yang dilatih dari awal tanpa
+bobot pra-latih, menerima masukan tiga kanal berupa \textit{softmap} pembuluh darah, \textit{softmap} area tepi, dan kanal hijau ternormalisasi CLAHE. Validasi silang 5-\textit{fold} yang
+mempertimbangkan kelompok citra serupa (\textit{group-aware cross-validation}) menghasilkan
+\textit{macro F1-score} sebesar \textbf{0,7853}. Percobaan ablasi yang terkontrol menunjukkan bahwa
+representasi \textit{softmap} memberikan peningkatan 0,0987 dibanding masukan RGB mentah
+(0,6866 vs 0,7853) pada model, data, dan protokol yang sama. Hasil ini membuktikan bahwa
+representasi spasial dari informasi pembuluh darah---bukan hanya nilai piksel mentah---merupakan
+kunci utama peningkatan performa klasifikasi \textit{stage} ROP.
+
+\vspace{12pt}
+
+\noindent
+Kata kunci: \textit{custom} CNN, \textit{enhancement} citra, citra fundus,
+\textit{Retinopathy of Prematurity}, segmentasi pembuluh darah, \textit{TinyResNetV2}
+
+\vspace{1.5cm}
+
+% --- ABSTRACT (English) ---
+\begin{center}
+{\fontsize{14pt}{17pt}\selectfont\bfseries ABSTRACT}
+\end{center}
+
+\vspace{6pt}
+
+\noindent
+GHIFFARI BRAVIA HISHAM, MUHAMMAD ABYAN PUTRA WIBOWO, ADAM NAUFAL,
+MOCHAMAD CHAIRULRIDJAL NURVIKRI, RAFIF MUHAMMAD FARRAS.
+Classification of Retinopathy of Prematurity Stages from Infant Fundus Images
+Using Image Enhancement, Vessel Segmentation, and Custom CNN.
+Digital Image Recognition Course. Supervised by NAMA DOSEN.
+
+\vspace{12pt}
+
+\noindent
+Retinopathy of Prematurity (ROP) is a vascular developmental disorder of the retina in
+premature infants that can lead to blindness if not detected early. This study constructs a
+classification pipeline for ROP staging from infant fundus images into five classes: Normal,
+Stage 1, Stage 2, Stage 3, and laser scars. The process consists of two main stages: classical
+vessel segmentation and neural network-based classification. The segmentation pipeline combines
+multiscale Gabor filters with Hessian-based Meijering response (the \textit{g40\_m60\_fine} configuration),
+achieving a best Dice score of 0.4739 on the HVDROPDB-BV dataset. The main classification model
+is TinyResNetV2 trained from scratch without pretrained weights, receiving a three-channel input
+consisting of vessel softmap, ridge softmap, and CLAHE-normalized green channel. Group-aware
+5-fold cross-validation yields a macro F1-score of \textbf{0.7853}. A controlled ablation experiment
+demonstrates that the softmap representation provides a +0.0987 improvement over raw RGB input
+(0.6866 vs. 0.7853) under identical model, data, and protocol settings. These results confirm
+that spatial vessel evidence---rather than raw pixel values---is the key driver of classification
+performance improvement for ROP staging.
+
+\vspace{12pt}
+
+\noindent
+Keywords: custom CNN, image enhancement, fundus image, Retinopathy of Prematurity,
+vessel segmentation, TinyResNetV2

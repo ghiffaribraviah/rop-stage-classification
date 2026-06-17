@@ -1,0 +1,144 @@
+%==============================================================
+% BAB I  PENDAHULUAN
+%==============================================================
+
+\chapter{PENDAHULUAN}
+
+%--------------------------------------------------------------
+\section{Latar Belakang}
+%--------------------------------------------------------------
+
+\textit{Retinopathy of Prematurity} (ROP) adalah gangguan pembuluh darah retina yang terjadi
+pada bayi yang lahir sebelum waktunya. Kondisi ini muncul akibat pertumbuhan pembuluh darah
+retina yang tidak sempurna setelah kelahiran prematur, dan dapat berkembang menjadi ablasio
+retina yang menyebabkan kebutaan permanen jika tidak ditangani sejak awal
+\citep{Chiang2021, Vahidmoghadam2026}. Kemajuan di bidang perawatan neonatal telah meningkatkan
+angka kelangsungan hidup bayi prematur di seluruh dunia, sehingga jumlah kasus ROP yang
+memerlukan pemantauan juga meningkat secara signifikan.
+
+Secara klinis, keparahan ROP dibagi ke dalam beberapa \textit{stage} berdasarkan perubahan
+struktural yang terlihat pada retina melalui pemeriksaan fundus. \textit{Stage} 1 ditandai
+dengan adanya garis batas (\textit{demarcation line}) yang memisahkan area retina yang sudah
+dan belum memiliki pembuluh darah. \textit{Stage} 2 menunjukkan penebalan garis tersebut
+menjadi tonjolan jaringan (\textit{ridge}). Pada \textit{stage} 3, terjadi pertumbuhan
+pembuluh darah baru ke arah vitreous yang disebut neovaskularisasi ekstraretina
+\citep{Chiang2021}. Diagnosis yang tepat pada \textit{stage} awal sangat penting karena
+intervensi medis yang tepat waktu dapat mencegah perkembangan ke kondisi yang lebih parah.
+
+Diagnosis ROP saat ini bergantung pada pemeriksaan langsung oleh dokter spesialis mata
+menggunakan kamera fundus khusus. Tantangan utama dalam proses ini adalah kelangkaan dokter
+spesialis retina anak, terutama di negara berkembang, serta tingginya variabilitas antar-dokter
+dalam menilai \textit{stage} penyakit \citep{Tong2020}. Otomatisasi melalui \textit{computer
+vision} menawarkan potensi untuk membantu proses skrining massal dan mengurangi beban tenaga
+medis.
+
+Namun, klasifikasi otomatis \textit{stage} ROP menghadapi tantangan tersendiri. Citra fundus
+bayi memiliki kualitas yang lebih rendah dibanding citra fundus dewasa karena adanya reflek
+kornea, pupil yang lebih kecil, dan kesulitan dalam mempertahankan fiksasi pandangan bayi
+selama pengambilan gambar. Selain itu, perbedaan visual antar-\textit{stage}, khususnya antara
+\textit{Stage} 1 dan \textit{Stage} 2, sangat halus sehingga bahkan model jaringan saraf yang
+telah dilatih dengan data besar pun sering kesulitan membedakan keduanya \citep{Zhao2024}.
+
+Penelitian sebelumnya menunjukkan bahwa teknik \textit{enhancement} citra seperti
+\textit{contrast-limited adaptive histogram equalization} (CLAHE) dan koreksi pencahayaan dapat
+membantu menonjolkan struktur klinis penting pada citra fundus bayi \citep{Rahim2024}.
+Demikian pula, segmentasi pembuluh darah secara otomatis telah terbukti dapat menghasilkan
+peta spasial yang berguna sebagai panduan bagi model klasifikasi \citep{Almeida2024}. Namun,
+pengaruh masing-masing pendekatan terhadap performa klasifikasi \textit{stage} ROP secara
+spesifik belum banyak diteliti secara sistematis dan terkontrol.
+
+Penelitian ini dirancang untuk menjawab pertanyaan tersebut secara langsung melalui sebuah
+\textit{pipeline} yang membandingkan berbagai bentuk representasi citra---mulai dari piksel
+RGB mentah, citra hasil \textit{enhancement}, hingga peta pembuluh darah---sebagai masukan
+untuk model jaringan saraf yang sama. Penelitian ini juga menyelidiki apakah sebuah jaringan
+saraf kecil yang dilatih dari awal (\textit{from scratch}) tanpa bobot pra-latih dapat
+mencapai performa yang bersaing dengan pendekatan berbasis fitur klasik.
+
+%--------------------------------------------------------------
+\section{Rumusan Masalah}
+%--------------------------------------------------------------
+
+Penelitian ini berfokus pada tiga pertanyaan teknis utama:
+
+\vspace{2mm}
+\noindent\textbf{Apakah \textit{enhancement} citra meningkatkan akurasi klasifikasi?}
+Koreksi pencahayaan dan CLAHE pada ruang warna L*a*b* diuji untuk melihat apakah
+perbaikan kontras citra secara visual berkorelasi dengan peningkatan performa model
+pada tugas klasifikasi \textit{stage} ROP.
+
+\vspace{2mm}
+\noindent\textbf{Apakah struktur pembuluh darah saja sudah cukup untuk membedakan \textit{stage}?}
+\textit{Vessel mask} biner hasil segmentasi pembuluh darah diuji secara terpisah untuk
+mengukur sejauh mana informasi bentuk dan distribusi pembuluh darah dapat membantu membedakan
+antara \textit{stage} 1 hingga 3 tanpa bergantung pada tekstur retina lainnya.
+
+\vspace{2mm}
+\noindent\textbf{Apakah representasi \textit{softmap} spasial lebih baik dari ringkasan fitur klasik?}
+Model jaringan saraf yang menerima peta spasial (\textit{softmap}) pembuluh darah dan area
+tepi secara langsung dibandingkan dengan model berbasis fitur skalar klasik yang menggunakan
+informasi vaskular yang sama, untuk menguji apakah pemrosesan spasial oleh jaringan saraf
+memberikan keuntungan yang nyata.
+
+%--------------------------------------------------------------
+\section{Tujuan}
+%--------------------------------------------------------------
+
+Tujuan penelitian ini adalah:
+
+\begin{enumerate}
+    \item Membangun dan mengevaluasi \textit{pipeline} segmentasi pembuluh darah retina secara
+    klasik pada citra fundus bayi menggunakan kombinasi filter Gabor dan Meijering.
+    \item Membandingkan performa model \textit{TinyResNetV2} dalam mengklasifikasi
+    \textit{stage} ROP menggunakan empat skenario representasi input: citra RGB mentah,
+    citra hasil \textit{enhancement}, \textit{vessel mask} biner, dan citra \textit{enhanced}
+    yang dipandu \textit{vessel mask}.
+    \item Menguji apakah representasi \textit{softmap} spasial sebagai masukan model jaringan
+    saraf dapat melampaui pendekatan berbasis fitur klasik yang menggunakan informasi
+    vaskular yang sama.
+    \item Mengevaluasi dampak protokol validasi silang yang mempertimbangkan kelompok citra
+    (\textit{group-aware cross-validation}) terhadap keandalan estimasi performa model.
+\end{enumerate}
+
+%--------------------------------------------------------------
+\section{Ruang Lingkup}
+%--------------------------------------------------------------
+
+Batasan dan lingkup penelitian ini ditetapkan sebagai berikut:
+
+\begin{itemize}
+    \item \textbf{Dataset Utama:} Menggunakan dataset publik Zhao2024 \citep{Zhao2024} yang
+    terdiri dari 1.099 citra fundus bayi dalam lima kelas untuk eksperimen klasifikasi utama.
+    \item \textbf{Kelas Klasifikasi:} Mencakup Normal, Stage 1, Stage 2, Stage 3, dan
+    \textit{laser scars}. Kelas \textit{laser scars} dimasukkan dalam klasifikasi akhir
+    untuk mendekati pengaturan 5-kelas yang digunakan dalam publikasi Zhao2024.
+    \item \textbf{Dataset Sekunder:} Menggunakan bagian HVDROPDB-BV dari Agrawal2021
+    \citep{Agrawal2021} khusus untuk mengevaluasi kualitas segmentasi pembuluh darah secara
+    kuantitatif menggunakan metrik Dice.
+    \item \textbf{Model:} Menggunakan arsitektur \textit{custom TinyResNetV2} yang dilatih
+    dari awal tanpa bobot pra-latih. Tidak ada penggunaan model pra-latih pada \textit{dataset}
+    seperti ImageNet dalam penelitian ini.
+    \item \textbf{Konteks:} Penelitian ini bersifat akademis dan bukan merupakan sistem
+    diagnostik klinis. Hasil yang dilaporkan tidak boleh digunakan untuk pengambilan keputusan
+    medis.
+\end{itemize}
+
+%--------------------------------------------------------------
+\section{Manfaat Penelitian}
+%--------------------------------------------------------------
+
+Penelitian ini memberikan beberapa kontribusi yang dapat digunakan oleh peneliti dan
+pengembang sistem di bidang analisis citra medis:
+
+\begin{itemize}
+    \item Menunjukkan secara eksperimental bahwa representasi spasial dari informasi pembuluh
+    darah lebih efektif daripada ringkasan fitur skalar dalam tugas klasifikasi \textit{stage}
+    ROP.
+    \item Memberikan bukti empiris tentang pentingnya protokol validasi silang yang
+    mempertimbangkan kelompok citra serupa (\textit{group-aware}) agar estimasi performa
+    yang dilaporkan mencerminkan kemampuan generalisasi model secara realistis.
+    \item Mendokumentasikan pengembangan sistematis \textit{pipeline} segmentasi pembuluh
+    darah klasik melalui serangkaian konfigurasi yang dievaluasi secara terkontrol.
+    \item Menyediakan kerangka percobaan yang dapat direplikasi untuk penelitian lanjutan
+    tentang klasifikasi \textit{stage} ROP dengan data yang lebih besar atau arsitektur yang
+    lebih canggih.
+\end{itemize}
