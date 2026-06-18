@@ -1,0 +1,80 @@
+%==============================================================
+% BAB V  SIMPULAN DAN SARAN
+%==============================================================
+
+\chapter{SIMPULAN DAN SARAN}
+
+%--------------------------------------------------------------
+\section{Simpulan}
+%--------------------------------------------------------------
+
+Penelitian ini membangun dan mengevaluasi sebuah \textit{pipeline} klasifikasi \textit{stage}
+\textit{Retinopathy of Prematurity} (ROP) dari citra fundus bayi, dengan fokus pada pengaruh
+berbagai bentuk representasi citra terhadap performa model jaringan saraf tiruan. Berdasarkan
+seluruh rangkaian eksperimen yang telah dilakukan, diperoleh tiga simpulan utama.
+
+\textbf{Pertama, representasi spasial pembuluh darah jauh lebih efektif daripada ringkasan
+fitur skalar.} Percobaan ablasi yang terkontrol, menggunakan model, data, protokol, dan
+\textit{hyperparameter} yang identik, dengan representasi input adalah satu-satunya variabel yang berbeda, menunjukkan bahwa masukan \textit{softmap} tiga kanal (peta pembuluh
+darah berbasis Gabor + peta area tepi berbasis Meijering dan \textit{oriented top-hat} +
+kanal hijau ternormalisasi) menghasilkan \textit{macro F1-score} sebesar
+0,7853, dibanding 0,6866 untuk masukan RGB mentah. Peningkatan sebesar +0,0987 ini
+sepenuhnya dapat dikaitkan dengan kualitas representasi input. \textit{Baseline} klasik terbaik yang menggunakan fitur vaskular yang sama namun diringkas
+menjadi vektor 48 dimensi hanya mencapai 0,5147. Jaringan saraf dapat memanfaatkan struktur
+spasial dari informasi yang sama secara jauh lebih efektif.
+
+\textbf{Kedua, protokol validasi silang yang mempertimbangkan kelompok citra adalah syarat
+wajib untuk mendapatkan estimasi performa yang bisa dipercaya.} Apabila pembagian data
+dilakukan pada tingkat citra tanpa mempertimbangkan kelompok, citra dari mata yang sama dapat
+masuk ke kedua sisi pelatihan dan pengujian, sehingga model berisiko mempelajari
+identitas mata dan bukan pola penyakit dan menghasilkan estimasi performa yang terlalu
+optimistis. Dengan menerapkan \textit{StratifiedGroupKFold} atas 721 kelompok yang
+teridentifikasi, angka yang dilaporkan (0,7853) merupakan estimasi yang lebih baik dan dapat
+dipertanggungjawabkan.
+
+\textbf{Ketiga, kompleksitas tambahan tidak selalu memberikan perbaikan.} Dua pendekatan
+yang secara intuitif tampak menjanjikan, \textit{ordinal smoothing} dan \textit{oversampling}, keduanya
+terbukti tidak berhasil dalam penelitian ini. \textit{Ordinal smoothing} menurunkan performa
+sebesar 0,055, sementara \textit{oversampling} Stage 1 justru memperburuk masalah presisi.
+Model \textit{TinyResNet} sederhana yang dilatih dari awal dengan \textit{focal loss} dan
+kalibrasi \textit{post-hoc} yang transparan merupakan pendekatan terbaik yang ditemukan.
+
+Sebagai sintesis akhir, keberhasilan model \textit{TinyResNet} berbasis masukan komposit spasial dalam mencapai \textit{Macro F1-score} sebesar 0,7853 membuktikan bahwa representasi data yang terstruktur jauh lebih krusial daripada sekadar meningkatkan kompleksitas arsitektur model. Hasil penelitian ini memiliki dampak klinis yang signifikan, yaitu sistem yang dapat diintegrasikan sebagai alat bantu skrining otomatis di NICU rumah sakit untuk mendeteksi dini kelainan patologis retina bayi prematur. Dengan menyaring kasus normal secara andal dan memprioritaskan rujukan kasus aktif (Stage 3), teknologi ini dapat berkontribusi dalam mengatasi keterbatasan jumlah dokter spesialis mata anak, menekan biaya operasional skrining, dan pada akhirnya mencegah kebutaan permanen pada bayi prematur.
+
+%--------------------------------------------------------------
+\section{Saran}
+%--------------------------------------------------------------
+
+Berdasarkan temuan dan keterbatasan penelitian ini, beberapa saran untuk penelitian lanjutan
+adalah sebagai berikut:
+
+\textbf{(1) Penggunaan representasi area tepi yang dapat dipelajari.}
+Kelas Stage 1 masih menjadi kelas tersulit karena garis batas (\textit{demarcation line})
+sering tipis dan berkontras rendah. Penelitian lanjutan dapat menggunakan model berbasis
+jaringan saraf seperti U-Net \citep{Ronneberger2015} atau mekanisme perhatian spasial untuk
+menghasilkan representasi \textit{ridge} yang lebih adaptif terhadap variasi tekstur citra,
+yang kemudian dapat meningkatkan performa klasifikasi Stage 1 secara bermakna.
+
+\textbf{(2) Pengumpulan data dengan metadata pasien yang terstruktur.} Penelitian ini
+menghadapi keterbatasan dalam validasi karena tidak tersedianya ID pasien yang terverifikasi
+pada dataset yang digunakan. Penelitian selanjutnya sebaiknya menggunakan dataset dengan
+metadata pasien yang lengkap sehingga pembagian data dapat dilakukan pada tingkat pasien,
+bukan pada tingkat estimasi kemiripan citra.
+
+\textbf{(3) Pengujian pada data dari berbagai jenis kamera dan kondisi klinis yang berbeda.}
+Dataset Zhao2024 didominasi oleh citra dari satu jenis kamera dan satu negara. Kemampuan
+model untuk bekerja dengan baik pada citra dari kamera lain (misalnya kamera \textit{wide-field} atau
+kamera portabel) perlu diuji secara terpisah sebelum model ini dapat dipertimbangkan untuk
+aplikasi skrining yang lebih luas.
+
+\textbf{(4) Eksplorasi strategi yang mengurangi prediksi \textit{false positive} Stage 1.} Hasil
+penelitian menunjukkan bahwa masalah utama pada Stage 1 adalah presisi yang rendah (0,45),
+bukan \textit{recall} (0,77). Penelitian selanjutnya perlu mencari pendekatan yang secara
+spesifik mengurangi kesalahan memprediksi Stage 1 pada sampel Stage 2, misalnya dengan
+menggunakan \textit{attention mechanism} yang dapat memfokuskan model
+pada perbedaan halus antara kedua kelas tersebut.
+
+\textbf{(5) Integrasi dengan sistem skrining klinis yang lebih luas.} Dalam jangka panjang,
+model yang dikembangkan perlu divalidasi secara klinis dalam lingkungan nyata dengan melibatkan
+dokter spesialis sebagai evaluator akhir. Penelitian kolaboratif antara peneliti bidang komputer dan praktisi medis diperlukan untuk memastikan bahwa metrik evaluasi dalam penelitian
+benar-benar mencerminkan kebutuhan diagnosis klinis yang sesungguhnya.

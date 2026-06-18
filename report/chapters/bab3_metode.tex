@@ -1,0 +1,289 @@
+%==============================================================
+% BAB III  METODE
+%==============================================================
+
+\chapter{METODE}
+
+%--------------------------------------------------------------
+\section{Data dan Strategi Pembagian Data}
+%--------------------------------------------------------------
+
+\subsection{Dataset Utama: Zhao2024}
+
+Dataset utama yang digunakan dalam penelitian ini adalah koleksi citra fundus bayi yang
+diterbitkan oleh \citet{Zhao2024}, selanjutnya disebut Zhao2024. Dataset ini terdiri dari
+1.099 citra fundus bayi prematur dalam lima kelas: Normal, Stage 1, Stage 2, Stage 3, dan
+bekas luka laser (\textit{laser scars}). Distribusi jumlah citra untuk setiap kategori disajikan pada Gambar \ref{fig:class_distribution}. 
+
+Untuk memberikan pemahaman visual mengenai karakteristik klinis pada setiap kelas ROP dalam dataset Zhao2024, contoh citra untuk masing-masing kategori ditunjukkan pada Gambar \ref{fig:dataset_samples}. Gambar tersebut memperlihatkan struktur retina yang normal hingga kelainan patologis seperti garis batas (\textit{demarcation line}) tipis pada Stage 1, tonjolan jaringan (\textit{ridge}) yang menebal pada Stage 2, pertumbuhan neovaskularisasi ekstraretina ke arah \textit{vitreous} pada Stage 3, dan area bekas tindakan medis fotokoagulasi laser pada kelas \textit{laser scars}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.7\linewidth]{images/class_distribution}
+  \caption{Distribusi jumlah citra untuk setiap kategori pada dataset utama}
+  \label{fig:class_distribution}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{images/dataset_samples}
+  \caption{Contoh citra fundus mata bayi prematur untuk masing-masing kelas dalam dataset Zhao2024}
+  \label{fig:dataset_samples}
+\end{figure}
+
+Analisis mendalam terhadap dataset menemukan adanya 12 citra yang identik secara byte
+(\textit{byte-identical duplicates}) dalam 6 kelompok duplikat. Yang lebih penting, tiga
+dari kelompok tersebut merupakan konflik label antar-kelas: citra yang persis sama tercatat
+di bawah dua kelas yang berbeda. Pasangan yang teridentifikasi adalah sebagai berikut:
+\begin{center}
+  \textit{Stage\_2\_ROP\_154.jpg} $\equiv$ \textit{Stage\_3\_ROP\_210.jpg} \\
+  \textit{Stage\_2\_ROP\_52.jpg} $\equiv$ \textit{Stage\_3\_ROP\_254.jpg} \\
+  \textit{Stage\_1\_ROP\_42.jpg} $\equiv$ \textit{Stage\_2\_ROP\_4.jpg}
+\end{center}
+Duplikat ini dibiarkan ada dalam dataset dan ditangani melalui protokol pengelompokan (\textit{grouping}), yaitu seluruh berkas duplikat ditempatkan ke dalam kelompok yang sama sehingga tidak pernah terbagi antara himpunan pelatihan dan pengujian.
+
+\subsection{Strategi Pembagian Data dan Pengelompokan}
+
+Karena dataset Zhao2024 tidak menyediakan identitas pasien pada nama file, pembagian data
+secara langsung berbasis identitas pasien tidak dapat dilakukan. Sebagai solusi, analisis
+kemiripan antar citra menggunakan korelasi silang ternormalisasi (\textit{Normalized Cross-
+Correlation}, NCC $\geq$ 0,99) dilakukan untuk mendeteksi pasangan citra yang berasal dari
+mata yang sama. Proses ini menghasilkan 721 kelompok dari total 1.099 citra yang kemudian
+disimpan dalam berkas \textit{clean\_manifest.json}.
+
+Validasi silang 5-\textit{fold} menggunakan \textit{StratifiedGroupKFold}---varian validasi silang yang menjamin distribusi kelas tetap merata di setiap \textit{fold} sekaligus memastikan seluruh anggota satu kelompok tidak terbagi antara himpunan pelatihan dan pengujian---diterapkan agar setiap kelompok selalu berada sepenuhnya di satu sisi batas pelatihan--pengujian. Strategi ini memastikan bahwa model benar-benar mempelajari pola penyakit, bukan pola citra dari mata tertentu.
+
+%--------------------------------------------------------------
+\section{Pembuatan Representasi Softmap Spasial}
+%--------------------------------------------------------------
+
+Representasi \textit{softmap} spasial dibuat untuk memberikan tiga jenis bukti visual kepada
+model klasifikasi: tekstur pembuluh darah, struktur area tepi atau \textit{ridge}, dan konteks
+intensitas kanal hijau. Seluruh kanal diproses pada citra yang lebih dulu diperkecil dengan
+batas sisi terpanjang 768 piksel, kemudian diubah ke ukuran akhir $224 \times 224$ piksel
+sebagai masukan \textit{TinyResNet}.
+
+\subsection{Estimasi FOV dan Normalisasi Kanal Hijau}
+
+Area \textit{field of view} (FOV) diperkirakan dari citra abu-abu dengan ambang intensitas
+rendah, dilanjutkan operasi \textit{morphological closing}, pengisian lubang, dan pemilihan
+komponen terhubung terbesar. Masker FOV ini digunakan untuk meniadakan latar luar retina
+pada seluruh kanal. Kanal hijau dipilih sebagai kanal dasar karena kontras antara pembuluh
+darah dan jaringan retina paling jelas pada kanal ini. Setelah FOV diterapkan, kanal hijau
+ditingkatkan menggunakan CLAHE dan dinormalisasi persentil ke rentang $[0, 1]$.
+
+\subsection{Softmap Pembuluh Darah Berbasis Plain Gabor}
+
+Kanal pembuluh darah dibuat dengan menonjolkan struktur tubular gelap pada kanal hijau.
+Pertama, kanal hijau yang telah diberi CLAHE dibalik intensitasnya sehingga pembuluh darah
+gelap menjadi respons terang. Selanjutnya, bank filter Gabor multiskala dan multiorientasi
+diterapkan pada citra tersebut. Skala yang digunakan adalah $\sigma = 1{,}5; 2{,}5; 3{,}5;
+5{,}0$ piksel dengan panjang gelombang 3, 5, 7, dan 10 piksel. Orientasi filter diambil dari
+$0^\circ$ hingga $165^\circ$ dengan langkah $15^\circ$. Respons maksimum dari seluruh filter
+digunakan sebagai peta pembuluh darah awal, kemudian diperhalus dengan median blur $7 \times
+7$, diberi CLAHE kedua, dan dinormalisasi kembali ke rentang $[0, 1]$.
+
+\subsection{Softmap Ridge Berbasis Meijering dan Oriented Top-Hat}
+
+Kanal \textit{ridge} dirancang untuk memperkuat struktur garis batas, tonjolan, dan area tepi
+yang relevan secara klinis pada Stage 1 hingga Stage 3. Respons pertama diperoleh dari filter
+Meijering berbasis Hessian pada kanal hijau CLAHE dengan skala $3, 5, 7, 9,$ dan $11$ piksel.
+Respons kedua diperoleh dari \textit{oriented top-hat} dengan elemen struktur garis pada 12
+orientasi. Kedua respons digabungkan sebagai:
+\begin{equation}
+  \text{ridge\_softmap} =
+  \operatorname{norm}\left(0{,}60 \times \text{meijering\_ridge}
+  + 0{,}40 \times \text{oriented\_tophat}\right).
+  \label{eq:ridge_softmap}
+\end{equation}
+
+\subsection{Komposit Softmap Tiga Kanal}
+
+Masukan \textit{softmap} akhir disusun dari tiga kanal kontinu:
+\begin{equation}
+  X_{\text{softmap}} =
+  [\text{plain\_gabor\_vessel},\ \text{ridge\_softmap},\ \text{clahe\_green}].
+  \label{eq:softmap_input}
+\end{equation}
+
+Ketiga kanal tersebut dimasker oleh FOV dan dinormalisasi sebelum diubah ukurannya menjadi
+$224 \times 224$ piksel. Dengan susunan ini, model menerima informasi pembuluh darah,
+informasi \textit{ridge}, dan konteks intensitas retina secara terpisah tetapi tetap spasial.
+
+\subsection{Evaluasi Pendukung Segmentasi Struktural}
+
+Selain digunakan sebagai representasi kontinu untuk klasifikasi, kanal struktural juga
+dievaluasi secara kuantitatif terhadap anotasi segmentasi dari dataset Agrawal2021. Kanal
+pembuluh darah dievaluasi terhadap HVDROPDB-BV, sedangkan kanal \textit{ridge} dievaluasi
+terhadap HVDROPDB-RIDGE. Evaluasi ini digunakan sebagai pemeriksaan pendukung bahwa peta
+struktur yang dihasilkan masih mengikuti anotasi spasial retina. Untuk evaluasi biner, peta
+respons terlebih dahulu dibinarisasi, kemudian dibandingkan dengan \textit{ground truth}
+menggunakan \textit{Dice coefficient}:
+\begin{equation}
+  \text{Dice} = \frac{2 \times |A \cap B|}{|A| + |B|},
+  \label{eq:dice}
+\end{equation}
+dengan $A$ menyatakan masker prediksi dan $B$ menyatakan masker anotasi pakar.
+
+%--------------------------------------------------------------
+\section{Representasi Citra Input}
+%--------------------------------------------------------------
+
+Penelitian ini membandingkan dua representasi citra input untuk menguji pengaruh
+pemrosesan citra spasial terhadap performa model klasifikasi. Gambar \ref{fig:pipeline_diagram} menunjukkan diagram alir \textit{pipeline} penelitian.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{images/pipeline_diagram}
+  \caption{Diagram alir \textit{pipeline} penelitian dari representasi input hingga klasifikasi}
+  \label{fig:pipeline_diagram}
+\end{figure}
+
+\vspace{2mm}
+\noindent\textbf{Citra RGB Mentah (\textit{Raw RGB})} \\
+Citra fundus asli yang hanya diubah ukurannya menjadi $224 \times 224$ piksel dan dinormalisasi nilai pikselnya ke rentang $[0, 1]$. Representasi ini berfungsi sebagai pembanding dasar (\textit{baseline}) tanpa pemrosesan tambahan apapun untuk menguji kemampuan model CNN dalam mempelajari pola langsung dari piksel warna mentah.
+
+\vspace{2mm}
+\noindent\textbf{Komposit Softmap Spasial (\textit{Spatial Softmap Composite})} \\
+Masukan tiga kanal kontinu yang dibentuk oleh: (1) \textit{softmap} pembuluh darah berbasis
+plain Gabor, (2) \textit{softmap} area tepi (\textit{ridge softmap}) berbasis Meijering dan
+\textit{oriented top-hat}, dan (3) kanal hijau ternormalisasi CLAHE yang telah di-masker FOV.
+Semua kanal bersifat kontinu dan dimasker oleh FOV. Komposit ini dirancang sebagai bukti visual
+terstruktur yang kaya bagi model CNN residual tanpa beban bias warna latar belakang retina.
+
+Perbandingan visual dari kedua representasi citra input beserta kanal penyusun komposit softmap dapat dilihat pada Gambar \ref{fig:input_scenarios_comparison}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{images/input_scenarios_comparison}
+  \caption{Perbandingan visual representasi citra input beserta kanal pembentuk komposit softmap}
+  \label{fig:input_scenarios_comparison}
+\end{figure}
+
+%--------------------------------------------------------------
+\section{Baseline Klasik: Fitur Rekayasa Manual}
+%--------------------------------------------------------------
+
+Sebelum membangun model jaringan saraf, sebuah \textit{baseline} berbasis fitur rekayasa manual
+(\textit{handcrafted features}) dibangun untuk menetapkan batas bawah performa yang harus
+dilampaui. \textit{Baseline} ini menggunakan 48 fitur yang diekstrak dari setiap citra, yang mencakup:
+
+\begin{itemize}
+    \item \textbf{Fitur morfologi pembuluh darah}: Kerapatan pembuluh darah (\textit{vessel
+    density}), proksi \textit{tortuositas}, anisotropi pembuluh, ukuran dan standar deviasi komponen.
+    \item \textbf{Fitur tekstur}: Matriks kookurensi tingkat keabuan (\textit{Gray-Level
+    Co-occurrence Matrix}, GLCM) \citep{Khandouzi2022} yang menghasilkan fitur kontras,
+    korelasi, energi, dan homogenitas.
+    \item \textbf{Fitur statistik intensitas}: Rata-rata dan standar deviasi intensitas pada
+    setiap kanal warna.
+    \item \textbf{Fitur area tepi (\textit{ridge})}: Luas, panjang, kerapatan, dan persentil
+    respons dari komponen \textit{ridge} yang terdeteksi.
+\end{itemize}
+
+Fitur-fitur tersebut kemudian dimasukkan ke dalam tiga jenis model klasifikasi: \textit{Support
+Vector Machine} (SVM) dengan kernel RBF, \textit{Random Forest} \citep{Breiman2001} dengan 400
+pohon keputusan (\textit{n\_estimators=400, max\_depth=None}), dan \textit{Gradient Boosting}.
+Evaluasi dilakukan menggunakan validasi silang 5-\textit{fold} yang distratifikasi berdasarkan kelas (tanpa pembatasan kelompok mata, berbeda dengan protokol \textit{group-aware} yang diterapkan pada model jaringan saraf).
+
+%--------------------------------------------------------------
+\section{Arsitektur Model Klasifikasi: TinyResNet}
+%--------------------------------------------------------------
+
+Model klasifikasi utama adalah arsitektur CNN residual kecil (\textit{TinyResNet}) yang
+dirancang dari awal (\textit{from scratch}) tanpa menggunakan bobot pra-latih. Arsitektur ini
+dipilih karena ukurannya yang proporsional dengan skala dataset sehingga risiko \textit{overfitting}
+dapat dikendalikan.
+
+Arsitektur \textit{TinyResNet} terdiri dari:
+\begin{enumerate}
+    \item Lapisan konvolusi awal $3 \times 3$ diikuti \textit{batch normalization} dan fungsi
+    aktivasi ReLU.
+    \item Tiga tahap \textit{residual block} bertingkat dengan lebar fitur masing-masing 48,
+    96, dan 192 kanal. Setiap tahap menerapkan \textit{downsampling} spasial melalui konvolusi
+    dengan \textit{stride} 2.
+    \item \textit{Global Average Pooling} untuk meringkas peta fitur dua dimensi menjadi vektor
+    satu dimensi.
+    \item Lapisan \textit{Dropout} untuk regulasi.
+    \item Lapisan \textit{Dense} dengan fungsi aktivasi \textit{softmax} untuk lima kelas.
+\end{enumerate}
+
+Struktur \textit{residual block} mengikuti pola dasarnya: \textit{conv-BN-ReLU-conv-BN} dengan
+hubungan pintas (\textit{skip connection}) yang menjumlahkan masukan blok dengan keluarannya.
+Arsitektur ini ditunjukkan pada Gambar \ref{fig:tinyresnet_arch}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.9\linewidth]{images/tinyresnet_arch}
+  \caption{Struktur arsitektur model neural residual kecil (TinyResNet)}
+  \label{fig:tinyresnet_arch}
+\end{figure}
+
+%--------------------------------------------------------------
+\section{Protokol Pelatihan}
+%--------------------------------------------------------------
+
+\subsection{Fungsi Kerugian dan Pembobotan Kelas}
+
+Pelatihan menggunakan \textit{focal loss} \citep{Lin2017} dengan parameter $\gamma = 1{,}0$
+dan bobot kelas berbanding terbalik dengan frekuensi masing-masing kelas
+(\textit{inverse-frequency class weights}). \textit{Focal loss} secara otomatis mengurangi
+kontribusi sampel yang mudah diklasifikasikan, sehingga pelatihan lebih berfokus pada sampel
+kelas minoritas yang sulit.
+
+\subsection{Optimisasi dan Penjadwalan Laju Belajar}
+
+Optimisasi menggunakan algoritma AdamW \citep{Loshchilov2019} dengan laju belajar awal
+$10^{-3}$ dan peluruhan bobot (\textit{weight decay}) $5 \times 10^{-4}$. Laju belajar
+dijadwalkan menggunakan strategi \textit{cosine annealing} selama 160 \textit{epoch}.
+
+\subsection{Augmentasi Data}
+
+Augmentasi data diterapkan selama pelatihan untuk meningkatkan variasi data latih dan
+mengurangi \textit{overfitting}. Teknik augmentasi yang digunakan meliputi:
+\begin{itemize}
+    \item \textit{MixUp} \citep{Zhang2018} ($\alpha = 0{,}2$, probabilitas 0,5 per \textit{batch}):
+    menggabungkan dua sampel citra dan labelnya secara proporsional menggunakan faktor pencampuran yang diambil dari distribusi Beta($\alpha$, $\alpha$).
+    \item \textit{CutMix} \citep{Yun2019} ($\alpha = 1{,}0$, probabilitas 0,5 per \textit{batch}):
+    menempelkan potongan gambar dari satu sampel ke sampel lain dengan label proporsional.
+    \item \textit{Label smoothing} 0,1: meratakan distribusi target agar model tidak terlalu
+    percaya diri (\textit{overconfident}) pada satu kelas.
+    \item \textit{Stochastic depth} (\textit{DropPath}) \citep{Huang2016} dengan jadwal
+    linear $0 \rightarrow 0{,}2$: menonaktifkan sebagian jalur residual secara acak
+    selama pelatihan sebagai bentuk regulasi.
+    \item \textit{Weight EMA} (\textit{Exponential Moving Average}) dengan peluruhan 0,999:
+    merata-ratakan bobot model secara eksponensial untuk mendapatkan model yang lebih stabil.
+    \item \textit{Flip test-time augmentation} pada saat inferensi OOF: prediksi dirata-ratakan
+    dari citra asli dan cerminan horizontalnya.
+\end{itemize}
+
+\subsection{Protokol Validasi Silang}
+
+Protokol utama yang digunakan adalah \textit{StratifiedGroupKFold} dengan 5 \textit{fold}.
+Pembagian ini memastikan bahwa: (1) distribusi kelas pada setiap \textit{fold} kira-kira
+proporsional, dan (2) seluruh citra dari kelompok yang sama (kelompok citra serupa yang
+terdeteksi melalui NCC) selalu berada di sisi yang sama. Prediksi \textit{out-of-fold} (OOF, yaitu prediksi model pada data yang tidak diikutkan dalam pelatihan \textit{fold} tersebut) dari kelima \textit{fold} digabungkan untuk menghitung metrik evaluasi akhir.
+
+%--------------------------------------------------------------
+\section{Metrik Evaluasi}
+%--------------------------------------------------------------
+
+\subsection{Metrik Klasifikasi}
+
+Metrik utama yang digunakan adalah \textit{macro F1-score}, yaitu rata-rata dari nilai
+F1-score masing-masing kelas tanpa memperhitungkan jumlah sampel per kelas. Metrik ini dipilih
+karena adanya ketidakseimbangan kelas pada dataset yang membuat akurasi keseluruhan menjadi
+tidak cukup informatif. Kelas dengan sampel lebih banyak dapat mendominasi akurasi walaupun kelas
+minoritas berkinerja buruk. Formula \textit{macro F1-score} adalah:
+
+\begin{equation}
+  \text{Macro F1} = \frac{1}{K} \sum_{k=1}^{K} F1_k = \frac{1}{K} \sum_{k=1}^{K}
+  \frac{2 \cdot P_k \cdot R_k}{P_k + R_k}
+  \label{eq:macro_f1}
+\end{equation}
+
+\noindent di mana $K$ adalah jumlah kelas, $P_k$ adalah presisi, dan $R_k$ adalah \textit{recall}
+untuk kelas ke-$k$.
+
+Selain \textit{macro F1-score}, metrik tambahan yang dilaporkan mencakup akurasi keseluruhan,
+\textit{macro precision}, \textit{macro recall}, dan \textit{F1-score} per kelas.
+

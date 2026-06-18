@@ -1,0 +1,327 @@
+%==============================================================
+% BAB IV  HASIL DAN PEMBAHASAN
+%==============================================================
+
+\chapter{HASIL DAN PEMBAHASAN}
+
+%--------------------------------------------------------------
+\section{Hasil Representasi Softmap Spasial}
+%--------------------------------------------------------------
+
+Representasi \textit{softmap} spasial menghasilkan tiga kanal yang saling melengkapi. Kanal
+plain Gabor menonjolkan tekstur pembuluh darah yang menyebar dari kutub posterior ke area
+perifer retina. Kanal \textit{ridge} berbasis Meijering dan \textit{oriented top-hat}
+menonjolkan struktur garis batas serta tonjolan yang relevan untuk membedakan Stage 1 dan
+Stage 2. Kanal hijau CLAHE mempertahankan konteks intensitas lokal agar model tetap menerima
+informasi jaringan retina yang tidak seluruhnya tercakup oleh dua kanal struktural pertama.
+
+Perbandingan visual pada Gambar \ref{fig:input_scenarios_comparison} menunjukkan bahwa
+komposit \textit{softmap} menyajikan informasi yang lebih terstruktur dibanding RGB mentah.
+Pada citra Stage 1, kanal \textit{ridge} membantu menonjolkan garis batas yang tipis dan
+berkontras rendah. Pada Stage 2 dan Stage 3, kombinasi kanal pembuluh darah dan kanal
+\textit{ridge} memberikan petunjuk spasial mengenai penebalan \textit{ridge} dan pertumbuhan
+neovaskularisasi. Representasi inilah yang kemudian dibandingkan secara langsung dengan RGB
+mentah pada eksperimen klasifikasi.
+
+Pada evaluasi pendukung segmentasi struktural, kanal pembuluh darah mencapai nilai Dice
+\textbf{0,4739} pada dataset HVDROPDB-BV. Kanal \textit{ridge} dievaluasi dengan protokol yang
+sama terhadap HVDROPDB-RIDGE untuk memeriksa kesesuaian peta \textit{ridge} dengan anotasi
+garis batas dan tonjolan retina. Evaluasi ini berperan sebagai validasi spasial pendukung,
+sementara eksperimen utama penelitian tetap berfokus pada dampak representasi \textit{softmap}
+terhadap performa klasifikasi \textit{stage} ROP.
+
+%--------------------------------------------------------------
+\section{Hasil Baseline Klasik}
+%--------------------------------------------------------------
+
+\subsection{Perbandingan Antar Pengklasifikasi}
+
+Baseline klasik menggunakan 48 fitur rekayasa manual dari peta pembuluh darah dan area tepi.
+Evaluasi dilakukan menggunakan validasi silang 5-\textit{fold} yang distratifikasi pada 756
+citra (kelas Stage 1, Stage 2, Stage 3 dari Zhao2024). Hasil perbandingan antar pengklasifikasi
+ditunjukkan pada Tabel \ref{tab:klasik_perbandingan}.
+
+\begin{table}[H]
+\centering
+\caption{Perbandingan \textit{macro F1-score} antar pengklasifikasi pada baseline klasik
+(3 kelas: Stage 1, Stage 2, Stage 3)}
+\label{tab:klasik_perbandingan}
+\begin{tabular}{l c}
+\toprule
+\textbf{Pengklasifikasi} & \textbf{\textit{Macro F1}} \\
+\midrule
+SVM (kernel RBF)           & 0,4964 \\
+\textbf{Random Forest}     & \textbf{0,5147} \\
+Gradient Boosting          & 0,4912 \\
+\midrule
+Baseline hanya fitur pembuluh darah & 0,4740 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{Random Forest} menghasilkan \textit{macro F1-score} terbaik sebesar 0,5147 dengan
+konfigurasi 400 pohon keputusan dan bobot kelas seimbang. Penambahan 12 fitur area tepi
+(\textit{ridge}) ke dalam 36 fitur pembuluh darah memberikan peningkatan sebesar +0,041
+(dari 0,474 menjadi 0,5147).
+
+\subsection{Pentingnya Fitur Area Tepi}
+
+Analisis tingkat kepentingan fitur (\textit{feature importance}) pada model \textit{Random
+Forest} menunjukkan bahwa empat fitur area tepi masuk ke dalam 12 besar fitur terpenting,
+seperti ditunjukkan pada Tabel \ref{tab:feature_importance}.
+
+\begin{table}[H]
+\centering
+\caption{Dua belas fitur terpenting pada model \textit{Random Forest}}
+\label{tab:feature_importance}
+\begin{tabular}{l c}
+\toprule
+\textbf{Fitur} & \textbf{Tingkat Kepentingan} \\
+\midrule
+tortuosity\_proxy         & 0,0427 \\
+comp\_size\_std           & 0,0328 \\
+vessel\_anisotropy        & 0,0325 \\
+int\_r\_std               & 0,0286 \\
+\textbf{ridge\_main\_area}     & \textbf{0,0283} \\
+\textbf{ridge\_main\_len}      & \textbf{0,0274} \\
+\textbf{ridge\_main\_extent}   & \textbf{0,0267} \\
+soft\_std                 & 0,0266 \\
+comp\_size\_max           & 0,0260 \\
+glcm\_correlation\_std    & 0,0258 \\
+\textbf{ridge\_resp\_p95}      & \textbf{0,0247} \\
+vessel\_density           & 0,0243 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Nilai-nilai ini mengonfirmasi bahwa fitur area tepi (\textit{ridge}) memberikan
+kontribusi nyata dalam membedakan \textit{stage} ROP, khususnya antara Stage 2 (yang ditandai
+\textit{ridge}) dan Stage lainnya.
+
+\subsection{Batas Atas Performa Klasik}
+
+Meskipun penambahan fitur tepi meningkatkan performa secara keseluruhan, F1-score untuk Stage
+1 hampir tidak bergerak dari rentang 0,30--0,31 pada seluruh konfigurasi yang dicoba. Analisis
+menunjukkan bahwa filter tepi klasik hanya mampu mendeteksi sekitar 37\% piksel \textit{demarcation
+line} yang sebenarnya. Garis batas yang tipis dan berkontras rendah pada Stage 1 merupakan
+struktur yang paling sulit dideteksi oleh filter berbasis aturan tanpa kemampuan belajar
+adaptif.
+
+%--------------------------------------------------------------
+\section{Hasil Klasifikasi dengan Jaringan Saraf Tiruan}
+%--------------------------------------------------------------
+
+\subsection{Ringkasan Hasil Eksperimen}
+
+Eksperimen jaringan saraf tiruan dilakukan secara bertahap, dengan setiap konfigurasi
+membangun di atas hasil konfigurasi sebelumnya. Tabel \ref{tab:hasil_keseluruhan} merangkum
+seluruh hasil yang diperoleh. Seluruh model jaringan saraf dievaluasi menggunakan protokol
+\textit{group-aware cross-validation} (\textit{StratifiedGroupKFold} 5-\textit{fold}) yang
+diterapkan secara konsisten sejak awal agar seluruh citra dari mata yang sama berada pada
+\textit{fold} yang sama (lihat Subbab \ref{subsec:group_aware}).
+
+\begin{table}[H]
+\centering
+\caption{Ringkasan hasil eksperimen klasifikasi}
+\label{tab:hasil_keseluruhan}
+\begin{tabular}{l l c l}
+\toprule
+\textbf{Eksperimen} & \textbf{Input} & \textbf{\textit{Macro F1}} & \textbf{Catatan} \\
+\midrule
+Baseline klasik terbaik     & 48 fitur    & 0,5147 & RF, 3 kelas \\
+CNN RGB (group-aware)       & RGB 3-kanal & 0,6866 & Baseline CNN \\
+\textbf{CNN softmap (group-aware)} & \textbf{Softmap} & \textbf{0,7853} & \textbf{Terbaik} \\
+CNN + kalibrasi Stage1      & Softmap     & 0,8018 & Kalibrasi pasca-hoc \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Tabel \ref{tab:hasil_keseluruhan} menunjukkan ringkasan performa dari berbagai konfigurasi eksperimen yang dilakukan. Model baseline klasik menggunakan fitur rekayasa manual menghasilkan performa awal yang rendah (0,5147), yang kemudian berhasil dilampaui oleh model CNN dengan masukan RGB (0,6866). Penggunaan representasi softmap spasial sebagai masukan model TinyResNet memberikan peningkatan performa terbesar hingga mencapai Macro F1-score sebesar 0,7853, menjadikannya sebagai model dasar terbaik dalam penelitian ini.
+
+Untuk mengatasi tingginya prediksi \textit{false positive} pada Stage 1 (di mana presisi awal hanya 0,45 akibat model yang terlalu sensitif memprediksi Stage 1), dilakukan eksperimen tambahan berupa penyesuaian bias logit \textit{post-hoc} (\textit{post-hoc logit-bias adjustment}). Dengan memberikan nilai bias negatif konstan sebesar $-1{,}40$ pada \textit{logit} Stage 1 setelah proses pelatihan selesai, model dapat menyaring prediksi palsu tersebut secara efektif sehingga meningkatkan nilai \textit{Macro F1-score} secara keseluruhan menjadi 0,8018. Meskipun demikian, model dengan softmap dasar tanpa kalibrasi (0,7853) tetap dianggap sebagai model utama yang paling andal untuk generalisasi karena tidak bergantung pada penyesuaian bias pasca-pemrosesan.
+
+\subsection{Protokol Evaluasi \textit{Group-Aware}}
+\label{subsec:group_aware}
+
+Dataset ROP yang digunakan memiliki dua karakteristik yang
+menuntut pembagian data dilakukan pada tingkat kelompok mata, bukan pada tingkat citra
+individual:
+
+\begin{enumerate}
+    \item \textbf{Duplikat byte-identik}: Terdapat 12 berkas citra yang persis sama dalam 6
+    kelompok, termasuk tiga pasang dengan label kelas yang berbeda (konflik label). Duplikat
+    seperti ini dapat muncul di kedua sisi batas pelatihan--pengujian secara bersamaan.
+    \item \textbf{Citra satu mata}: Beberapa citra berasal dari mata yang sama tetapi dicatat
+    sebagai berkas terpisah. Analisis \textit{normalized cross-correlation} (NCC $\geq$ 0,99)
+    mengidentifikasi sekitar 63 pasang citra hampir-duplikat. Pembagian data pada tingkat citra
+    akan membiarkan citra dari mata yang sama masuk ke pelatihan dan pengujian sekaligus,
+    sehingga model dapat mengidentifikasi mata, bukan penyakitnya.
+\end{enumerate}
+
+Untuk mengatasi kedua karakteristik tersebut, seluruh eksperimen klasifikasi jaringan saraf
+menggunakan \textit{StratifiedGroupKFold} 5-\textit{fold}, di mana seluruh citra dari satu
+kelompok mata ditempatkan pada \textit{fold} yang sama. Protokol ini menghasilkan estimasi
+performa yang lebih jujur dan dapat dipercaya, meskipun nilainya lebih rendah
+dibanding pembagian tingkat citra.
+
+\subsection{Hasil Terbaik}
+
+Model dengan performa terbaik adalah \textit{TinyResNet} yang dilatih dari awal menggunakan
+masukan tiga kanal softmap, dievaluasi dengan \textit{StratifiedGroupKFold} 5-\textit{fold}.
+Hasil lengkap ditunjukkan pada Tabel \ref{tab:hasil_terbaik}.
+
+\begin{table}[H]
+\centering
+\caption{Hasil model terbaik: \textit{TinyResNet} dengan masukan softmap (group-aware CV)}
+\label{tab:hasil_terbaik}
+\begin{tabular}{l c}
+\toprule
+\textbf{Metrik} & \textbf{Nilai} \\
+\midrule
+OOF \textit{Macro F1-score}        & \textbf{0,7853} \\
+OOF Akurasi               & 0,8317 \\
+OOF Macro Precision       & 0,7867 \\
+OOF Macro Recall          & 0,8028 \\
+\midrule
+\textit{F1} per-\textit{fold} (5 \textit{fold}) & 0,7747 / 0,7881 / 0,7597 / 0,7834 / 0,8203 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Performa per-kelas ditunjukkan pada Tabel \ref{tab:performa_per_kelas}.
+
+\begin{table}[H]
+\centering
+\caption{Performa per kelas model terbaik (OOF, group-aware)}
+\label{tab:performa_per_kelas}
+\begin{tabular}{l c c c c}
+\toprule
+\textbf{Kelas} & \textbf{Presisi} & \textbf{Recall} & \textbf{\textit{F1}} & \textbf{Jumlah} \\
+\midrule
+Normal       & 0,95 & 0,90 & 0,93 & 236 \\
+Stage 1      & 0,45 & 0,77 & 0,57 & 94  \\
+Stage 2      & 0,70 & 0,61 & 0,65 & 165 \\
+Stage 3      & 0,83 & 0,82 & 0,83 & 261 \\
+Laser Scars  & 1,00 & 0,92 & 0,96 & 343 \\
+\midrule
+\textbf{Macro} & \textbf{0,79} & \textbf{0,80} & \textbf{0,79} & \textbf{1.099} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Visualisasi matriks konfusi model terbaik ditunjukkan pada Gambar \ref{fig:confusion_matrix}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{images/confusion_matrix_champion}
+  \caption{Matriks konfusi TinyResNet pada evaluasi validasi silang group-aware}
+  \label{fig:confusion_matrix}
+\end{figure}
+
+Untuk menganalisis lebih lanjut keputusan klasifikasi yang dibuat oleh model, beberapa contoh hasil klasifikasi benar (\textit{true prediction}) dan klasifikasi salah (\textit{false prediction}) dari dataset utama disajikan pada Gambar \ref{fig:prediction_examples}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{images/prediction_examples}
+  \caption{Contoh visualisasi klasifikasi benar (true prediction) dan salah (false prediction) oleh model TinyResNet}
+  \label{fig:prediction_examples}
+\end{figure}
+
+Gambar \ref{fig:prediction_examples} menunjukkan bahwa model mampu mengenali dengan tepat kelas Normal (a) karena tidak adanya struktur patologis dan kelas Stage 3 (b) karena adanya neovaskularisasi ekstraretina yang sangat menonjol di kutub posterior. Namun, terdapat kegagalan klasifikasi pada beberapa sampel. Pada Gambar \ref{fig:prediction_examples}(c), citra Stage 2 yang memiliki tonjolan (\textit{ridge}) tipis salah diprediksi sebagai Stage 1. Hal ini disebabkan karena batas visual antara tonjolan tipis (Stage 2 awal) dan garis batas datar (Stage 1 akhir) subjektif secara klinis. Pada Gambar \ref{fig:prediction_examples}(d), citra Stage 1 dengan garis batas kontras rendah salah diklasifikasikan sebagai Normal. Kesalahan ini merupakan yang umum terjadi akibat kemiripan visual yang tinggi.
+
+%--------------------------------------------------------------
+\section{Pembahasan}
+%--------------------------------------------------------------
+
+\subsection{Representasi Softmap vs. RGB}
+
+Percobaan ablasi yang paling bisa dipercaya dalam penelitian ini adalah perbandingan langsung
+antara masukan RGB mentah dengan softmap pada model, data, protokol, dan hyperparameter
+yang identik---dengan representasi input adalah satu-satunya variabel yang berbeda. Hasil perbandingan
+ditunjukkan pada Gambar \ref{fig:hasil_perbandingan}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{images/results_comparison_chart}
+  \caption{Perbandingan macro F1-score antar konfigurasi eksperimen klasifikasi}
+  \label{fig:hasil_perbandingan}
+\end{figure}
+
+Masukan softmap menghasilkan \textit{macro F1-score} 0,7853 dibanding 0,6866 untuk masukan
+RGB pada model yang sama, menunjukkan peningkatan sebesar \textbf{+0,0987}. Peningkatan
+ini sepenuhnya dapat dikaitkan dengan perbedaan representasi input, karena tidak ada variabel
+lain yang berubah. Ini membuktikan secara langsung bahwa informasi spasial pembuluh darah
+dan area tepi yang dikodekan dalam softmap lebih berguna bagi jaringan saraf dibanding nilai
+piksel RGB mentah.
+
+\subsection{Hambatan pada Stage 1 dan Stage 2}
+
+Kelas Stage 1 dan Stage 2 tetap menjadi tantangan terbesar dalam klasifikasi. Stage 1 mencapai \textit{F1-score} 0,57 dengan presisi rendah (0,45) namun recall tinggi (0,77), menunjukkan
+bahwa model cenderung terlalu sering memprediksi Stage 1. Banyak sampel Stage 2 yang
+diprediksi sebagai Stage 1, yaitu kesalahan yang
+disebabkan karena Stage 1 dan Stage 2 berbeda hanya dalam tingkat ketebalan \textit{ridge}
+yang secara visual sangat mirip (\textit{adjacent-class confusion}).
+
+Stage 2 mencapai \textit{F1-score} 0,65 dengan recall yang lebih rendah (0,61), menunjukkan sebagian
+sampel Stage 2 yang bocor ke Stage 1 dan Stage 3. Pola ini konsisten dengan karakteristik penyakit yaitu, Stage 2
+sebagai kondisi \textit{transisi} antara Stage 1 dan Stage 3, sehingga batas keputusannya
+secara alami lebih tidak jelas.
+
+\subsection{Pendekatan yang Tidak Efektif}
+
+Penelitian ini secara eksplisit mendokumentasikan dua pendekatan yang telah dicoba dan terbukti
+tidak efektif:
+
+\textbf{(1) Pendekatan Ordinal Smoothing}: Hipotesis bahwa memperlakukan \textit{stage} sebagai
+variabel ordinal (Stage 1 $<$ Stage 2 $<$ Stage 3) dengan menggunakan \textit{ordinal neighbor
+smoothing} ($\epsilon = 0{,}15$) akan mengurangi kesalahan antar-\textit{stage} yang
+berdekatan. Hasilnya menunjukkan sebaliknya: pada percobaan ablasi yang terkontrol,
+penambahan \textit{ordinal smoothing} ke model berbasis softmap dasar justru menurunkan \textit{macro F1} sebesar
+0,055. \textit{Recall} Stage 1 yang ditarget untuk ditingkatkan justru turun dari 0,57 menjadi
+0,51. Pendekatan ini dinyatakan gagal.
+
+\textbf{(2)} \textit{Oversampling} \textbf{Stage 1}: Hipotesis bahwa memperbanyak sampel Stage 1 (n=94) dalam
+setiap \textit{batch} menggunakan \textit{WeightedRandomSampler} dengan faktor $\times$3 akan
+memperbaiki \textit{F1-score} Stage 1. Hasilnya, pada dua \textit{fold} yang dijalankan, performa turun dari
+0,778 menjadi 0,717 dan dari 0,773 menjadi 0,684. Masalah pada Stage 1 bukan kekurangan
+eksposur (\textit{recall} sudah 0,77), melainkan terlalu banyak prediksi \textit{false positive}
+(\textit{precision} hanya 0,45). \textit{Oversampling} memperburuk ketidakseimbangan ini. Pendekatan
+ini dinyatakan gagal.
+
+Pelajaran dari kedua kegagalan ini adalah bahwa masalah Stage 1--Stage 2 merupakan konfusi
+yang disebabkan oleh kesamaan visual antar kelas yang berdekatan secara klinis. Solusi yang
+lebih baik adalah pendekatan yang dapat mengurangi prediksi \textit{false positive} Stage 1 secara
+spesifik, bukan pendekatan yang memperbesar sinyal Stage 1 secara global.
+
+\subsection{Dampak Praktis dan Relevansi Klinis}
+
+Hasil penelitian ini memiliki relevansi klinis yang signifikan untuk mendukung program skrining ROP di unit perawatan intensif bayi prematur (NICU). Dalam praktik medis, beberapa dampak praktis dari sistem yang diusulkan adalah sebagai berikut:
+
+\begin{enumerate}
+    \item \textbf{Alur Kerja Triage yang Aman dan Efektif}: Dari perspektif penapisan (skrining), sensitivitas tinggi pada kelas berisiko adalah prioritas utama. Model terbaik kami mencapai \textit{recall} sebesar 0,77 pada Stage 1 dan 0,82 pada Stage 3. Hal ini berarti model berperilaku sangat konservatif dan aman secara medis, meminimalkan risiko bayi dengan ROP aktif lolos dari pemeriksaan (false negatives).
+    \item \textbf{Membantu Pengambilan Keputusan Rujukan}: Kemampuan klasifikasi yang kuat pada kelas Normal (\textit{F1-score} 0,93) dan kelas \textit{laser scars} (\textit{F1-score} 0,96) memungkinkan model berfungsi sebagai alat penyaring awal otomatis. Bayi dengan kondisi normal dapat disaring dengan cepat, sehingga dokter spesialis mata dapat mencurahkan waktu dan sumber daya medis yang terbatas untuk berfokus pada bayi dengan gejala Stage 2 dan Stage 3 yang membutuhkan pemantauan ketat serta tindakan klinis segera.
+    \item \textbf{Mengurangi Variabilitas Antar-Dokter}: Penilaian tingkatan ROP secara visual oleh manusia bersifat subjektif, terutama pada batas transisi antara Stage 1 dan Stage 2. Model komputer memberikan metrik analisis spasial yang objektif dan konsisten yang mengurangi inkonsistensi diagnosis antar-pemeriksa di rumah sakit yang berbeda.
+\end{enumerate}
+Secara keseluruhan, pemanfaatan representasi komposit spasial dalam arsitektur TinyResNet terbukti memberikan hasil diagnosis yang andal dari segi akurasi dan klinis tanpa memerlukan \textit{transfer learning} dari domain non-medis.
+
+\subsection{Keterbatasan Penelitian}
+
+Beberapa keterbatasan penting perlu dicatat:
+
+\begin{itemize}
+    \item \textbf{Tidak ada identitas pasien yang terverifikasi}: Pengelompokan berdasarkan NCC
+    merupakan pendekatan terbaik yang tersedia mengingat tidak adanya ID pasien dalam nama
+    berkas. Meskipun ini mengurangi risiko tumpang tindih antar himpunan data, hasilnya tidak
+    dapat dijamin setara dengan pembagian berbasis pasien yang terverifikasi.
+    \item \textbf{Dataset tunggal}: Seluruh eksperimen dilakukan pada dataset Zhao2024 dari
+    satu negara dan sejenis kamera. Kemampuan generalisasi ke dataset dari kamera
+    berbeda atau populasi yang berbeda belum diuji.
+    \item \textbf{Tidak ada bobot pra-latih}: Keputusan untuk tidak menggunakan bobot pra-latih
+    (karena kanal masukan adalah softmap, bukan RGB) berarti penelitian ini tidak dapat
+    memanfaatkan pengetahuan visual umum yang telah dipelajari dari dataset berskala besar.
+    Ini adalah \textit{trade-off} yang disengaja dan terdokumentasi.
+    \item \textbf{Batas atas Stage 1}: F1-score Stage 1 sebesar 0,57 masih jauh di bawah
+    kelas lainnya. Meningkatkan performa Stage 1 memerlukan penelitian lebih lanjut, mungkin
+    dengan menggunakan model segmentasi yang dapat dipelajari (\textit{learned segmenter})
+    seperti U-Net \citep{Ronneberger2015} untuk menghasilkan peta tepi yang lebih akurat.
+\end{itemize}
