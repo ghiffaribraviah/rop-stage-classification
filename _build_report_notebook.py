@@ -104,6 +104,7 @@ cells: list[dict] = [
     code(
         """
         import cv2
+        import json
         import matplotlib.pyplot as plt
         import numpy as np
         import pandas as pd
@@ -116,7 +117,7 @@ cells: list[dict] = [
         from skimage.feature import graycomatrix, graycoprops
         from skimage.filters import meijering
         from skimage.morphology import skeletonize
-        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
         from sklearn.metrics import (
             ConfusionMatrixDisplay,
             accuracy_score,
@@ -125,9 +126,10 @@ cells: list[dict] = [
             f1_score,
             precision_recall_fscore_support,
         )
-        from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
+        from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold, cross_val_predict
         from sklearn.preprocessing import StandardScaler
         from sklearn.pipeline import Pipeline
+        from sklearn.svm import SVC
         from torch.utils.data import DataLoader, Dataset
         from tqdm.auto import tqdm
 
@@ -167,19 +169,17 @@ cells: list[dict] = [
             run_training: bool = False
             run_quick_training: bool = False
             use_tta: bool = True
-            use_known_report_results_when_not_run: bool = True
+            use_amp: bool = False
+            use_data_parallel: bool = False
 
         cfg = CFG()
 
-        REPORT_RESULTS = pd.DataFrame([
-            {"scenario": "Baseline klasik terbaik", "input": "48 fitur", "macro_f1": 0.5147, "note": "RF, 3 kelas"},
-            {"scenario": "CNN RGB (group-aware)", "input": "RGB", "macro_f1": 0.6866, "note": "OOF 5-fold"},
-            {"scenario": "CNN softmap (group-aware)", "input": "Softmap", "macro_f1": 0.7853, "note": "OOF 5-fold"},
-            {"scenario": "CNN + kalibrasi Stage1", "input": "Softmap", "macro_f1": 0.8018, "note": "Post-hoc"},
+        REFERENCE_RESULTS = pd.DataFrame([
+            {"scenario": "Classical RF", "input": "48 fitur", "macro_f1": 0.5147, "source": "experiments/classical/rop_classical.py"},
+            {"scenario": "CNN RGB", "input": "RGB", "macro_f1": 0.6866, "source": "experiments/cnn/v2_group_rgb.log"},
+            {"scenario": "CNN softmap", "input": "Softmap", "macro_f1": 0.7853, "source": "experiments/cnn/v2_group.log"},
+            {"scenario": "CNN softmap + Stage1 logit bias", "input": "Softmap", "macro_f1": 0.8018, "source": "experiments/cnn/masked_cnn_cv_v2_ablation.py"},
         ])
-        REPORT_VESSEL_DICE = 0.3881
-        REPORT_RIDGE_DICE = 0.0993
-
         def seed_everything(seed=42):
             random.seed(seed)
             np.random.seed(seed)
@@ -242,8 +242,22 @@ cells: list[dict] = [
         if not AGRAWAL_ROOT.exists():
             AGRAWAL_ROOT = find_dir(["Agrawal2021"])
 
+        def find_file(filename):
+            for root in INPUT_ROOTS:
+                if not root.exists():
+                    continue
+                hits = sorted(root.rglob(filename), key=lambda p: len(str(p)))
+                if hits:
+                    return hits[0]
+            return None
+
+        CLEAN_MANIFEST_PATH = REPO_ROOT / "experiments" / "cnn" / "clean_manifest.json"
+        if not CLEAN_MANIFEST_PATH.exists():
+            CLEAN_MANIFEST_PATH = find_file("clean_manifest.json")
+
         print("Zhao2024:", ZHAO_ROOT)
         print("Agrawal2021:", AGRAWAL_ROOT)
+        print("clean_manifest:", CLEAN_MANIFEST_PATH)
         """
     ),
     code(
@@ -432,17 +446,20 @@ cells: list[dict] = [
     ),
     code(
         """
-        def infer_group_key(path):
-            stem = Path(path).stem
-            # This is a conservative filename-based fallback. If patient IDs exist,
-            # replace this with the explicit patient/eye identifier.
-            return stem
+        def load_reference_group_map(path):
+            if path is None or not Path(path).exists():
+                return {}
+            rows = json.load(open(path))
+            # Upstream v2 maps Path(entry["name"]).stem -> group.
+            return {Path(item["name"]).stem: int(item["group"]) for item in rows if "name" in item and "group" in item}
 
         def build_zhao_manifest(root):
             rows = []
             if root is None or not Path(root).exists():
-                return pd.DataFrame(columns=["path", "label", "label_id", "key", "group"])
+                return pd.DataFrame(columns=["path", "label", "label_id", "key", "group", "group_source"])
             root = Path(root)
+            group_map = load_reference_group_map(CLEAN_MANIFEST_PATH)
+            singleton_base = (max(group_map.values()) + 1) if group_map else 0
             for dirname, label in DIR2CLASS.items():
                 class_dir = root / dirname
                 if not class_dir.exists():
@@ -450,17 +467,30 @@ cells: list[dict] = [
                 for path in sorted(class_dir.iterdir()):
                     if path.suffix.lower() not in IMG_EXTS:
                         continue
+                    stem = path.stem
+                    if stem in group_map:
+                        group = int(group_map[stem])
+                        group_source = "clean_manifest"
+                    else:
+                        # Mirrors upstream masked_cnn_cv_v2.py: rows without a
+                        # clean-manifest mapping become independent singleton groups.
+                        group = singleton_base + len(rows)
+                        group_source = "singleton"
                     rows.append({
                         "path": str(path),
                         "label": label,
                         "label_id": CLASS2ID[label],
-                        "key": f"{label}_{path.stem}".replace(" ", "_"),
-                        "group": infer_group_key(path),
+                        "key": f"{label}_{stem}",
+                        "group": group,
+                        "group_source": group_source,
                     })
             return pd.DataFrame(rows)
 
         df = build_zhao_manifest(ZHAO_ROOT)
         print("Rows:", len(df))
+        print("Groups:", df["group"].nunique() if len(df) else 0)
+        if len(df):
+            print(df["group_source"].value_counts().to_dict())
         display(df.head())
         display(df["label"].value_counts().reindex(CLASSES).fillna(0).astype(int).to_frame("n"))
         """
@@ -796,36 +826,76 @@ cells: list[dict] = [
     code(
         """
         classical_result = None
+        classical_all_results = pd.DataFrame()
         if cfg.run_classical_baseline and len(df):
-            # Report baseline is 3-class only.
-            cdf = df[df["label"].isin(["Stage1", "Stage2", "Stage3"])].reset_index(drop=True)
-            feature_rows = []
-            for row in tqdm(cdf.to_dict("records"), desc="classical features"):
-                feats = extract_classical_features(row["path"])
-                feats.update({"label": row["label"], "label_id": row["label_id"], "path": row["path"]})
-                feature_rows.append(feats)
-            features_df = pd.DataFrame(feature_rows)
-            features_df.to_csv(OUTPUT_DIR / "classical_features.csv", index=False)
-            X = features_df.drop(columns=["label", "label_id", "path"]).values
-            y = features_df["label"].map({"Stage1": 0, "Stage2": 1, "Stage3": 2}).values
-            skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=cfg.seed)
-            pred = np.full(len(cdf), -1, dtype=int)
-            for tr, te in skf.split(X, y):
-                model = Pipeline([
-                    ("scale", StandardScaler()),
-                    ("rf", RandomForestClassifier(n_estimators=500, random_state=cfg.seed, class_weight="balanced")),
-                ])
-                model.fit(X[tr], y[tr])
-                pred[te] = model.predict(X[te])
-            classical_result = {
-                "scenario": "Baseline klasik terbaik",
-                "input": "48 fitur",
-                "macro_f1": f1_score(y, pred, average="macro"),
-                "note": "RF, recomputed",
-            }
+            script = REPO_ROOT / "experiments" / "classical" / "rop_classical.py"
+            if script.exists():
+                print(f"Running upstream classical baseline script: {script}")
+                proc = subprocess.run([sys.executable, str(script)], cwd=str(REPO_ROOT), text=True, capture_output=True)
+                print(proc.stdout)
+                if proc.returncode != 0:
+                    print(proc.stderr)
+                    raise RuntimeError(f"Classical baseline script failed with exit code {proc.returncode}")
+                rows = []
+                for match in re.finditer(r"\\[(?P<name>[^\\]]+)\\] macro-F1=(?P<f1>[0-9.]+)\\s+acc=(?P<acc>[0-9.]+)", proc.stdout):
+                    rows.append({
+                        "model": match.group("name"),
+                        "macro_f1": float(match.group("f1")),
+                        "accuracy": float(match.group("acc")),
+                    })
+                classical_all_results = pd.DataFrame(rows)
+                classical_all_results.to_csv(OUTPUT_DIR / "classical_baseline_results.csv", index=False)
+                rf = classical_all_results[classical_all_results["model"] == "random_forest"]
+                if len(rf):
+                    classical_result = {
+                        "scenario": "Baseline klasik terbaik",
+                        "input": "48 fitur",
+                        "macro_f1": float(rf.iloc[0]["macro_f1"]),
+                        "note": "upstream rop_classical.py",
+                    }
+            else:
+                print("Upstream classical script not found; using inline fallback with upstream model settings.")
+                cdf = df[df["label"].isin(["Stage1", "Stage2", "Stage3"])].reset_index(drop=True)
+                feature_rows = []
+                for row in tqdm(cdf.to_dict("records"), desc="classical features"):
+                    feats = extract_classical_features(row["path"])
+                    feats.update({"label": row["label"], "label_id": row["label_id"], "path": row["path"]})
+                    feature_rows.append(feats)
+                features_df = pd.DataFrame(feature_rows)
+                features_df.to_csv(OUTPUT_DIR / "classical_features.csv", index=False)
+                X = features_df.drop(columns=["label", "label_id", "path"]).values
+                y = features_df["label"].map({"Stage1": 0, "Stage2": 1, "Stage3": 2}).values
+                cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=cfg.seed)
+                models = {
+                    "svm_rbf": Pipeline([
+                        ("scale", StandardScaler()),
+                        ("clf", SVC(kernel="rbf", C=10.0, gamma="scale", class_weight="balanced")),
+                    ]),
+                    "random_forest": RandomForestClassifier(
+                        n_estimators=400, max_depth=None, class_weight="balanced", n_jobs=-1, random_state=cfg.seed
+                    ),
+                    "grad_boost": GradientBoostingClassifier(
+                        n_estimators=300, max_depth=3, learning_rate=0.05, random_state=cfg.seed
+                    ),
+                }
+                rows = []
+                for name, model in models.items():
+                    pred = cross_val_predict(model, X, y, cv=cv, n_jobs=-1)
+                    rows.append({"model": name, "macro_f1": f1_score(y, pred, average="macro"), "accuracy": accuracy_score(y, pred)})
+                classical_all_results = pd.DataFrame(rows)
+                classical_all_results.to_csv(OUTPUT_DIR / "classical_baseline_results.csv", index=False)
+                rf = classical_all_results[classical_all_results["model"] == "random_forest"]
+                if len(rf):
+                    classical_result = {
+                        "scenario": "Baseline klasik terbaik",
+                        "input": "48 fitur",
+                        "macro_f1": float(rf.iloc[0]["macro_f1"]),
+                        "note": "inline upstream settings",
+                    }
+            display(classical_all_results)
             print(classical_result)
         else:
-            print("Classical baseline skipped. Report value:", REPORT_RESULTS.iloc[0].to_dict())
+            print("Classical baseline skipped. No classical metric will be added to final_metrics.csv.")
         """
     ),
     md(
@@ -983,7 +1053,7 @@ cells: list[dict] = [
         """
         def make_model():
             model = TinyResNet(n_classes=len(CLASSES)).to(device)
-            if n_gpus >= 2:
+            if cfg.use_data_parallel and n_gpus >= 2:
                 model = nn.DataParallel(model)
             return model
 
@@ -1013,7 +1083,7 @@ cells: list[dict] = [
             weights = torch.tensor(counts.sum() / (len(CLASSES) * np.maximum(counts, 1)), dtype=torch.float32, device=device)
             opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
             sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
-            scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
+            scaler = torch.cuda.amp.GradScaler(enabled=(cfg.use_amp and torch.cuda.is_available()))
 
             for epoch in range(1, epochs + 1):
                 model.train()
@@ -1022,7 +1092,7 @@ cells: list[dict] = [
                     labels = labels.to(device, non_blocking=True)
                     images, a, b, lam = mix_batch(images, labels, p=cfg.mix_p)
                     opt.zero_grad(set_to_none=True)
-                    with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+                    with torch.cuda.amp.autocast(enabled=(cfg.use_amp and torch.cuda.is_available())):
                         loss = smooth_mix_ce(model(images), a, b, lam, weights, cfg.label_smoothing)
                     scaler.scale(loss).backward()
                     scaler.step(opt)
@@ -1033,18 +1103,18 @@ cells: list[dict] = [
                     print(f"{input_name} epoch {epoch}/{epochs}")
 
             ema.ema.to(device).eval()
-            preds, probs, y_true = [], [], []
+            preds, logits_all, y_true = [], [], []
             with torch.no_grad():
                 for images, labels in val_loader:
                     images = images.to(device, non_blocking=True)
                     logits = ema.ema(images)
                     if cfg.use_tta:
                         logits = logits + ema.ema(torch.flip(images, dims=[3]))
-                    prob = torch.softmax(logits, dim=1).cpu().numpy()
-                    probs.append(prob)
-                    preds.extend(prob.argmax(axis=1).tolist())
+                    logits_np = logits.cpu().numpy()
+                    logits_all.append(logits_np)
+                    preds.extend(logits_np.argmax(axis=1).tolist())
                     y_true.extend(labels.numpy().tolist())
-            return np.array(preds), np.concatenate(probs), np.array(y_true)
+            return np.array(preds), np.concatenate(logits_all), np.array(y_true)
         """
     ),
     code(
@@ -1055,13 +1125,15 @@ cells: list[dict] = [
             groups = frame["group"].astype(str).values
             splitter = StratifiedGroupKFold(n_splits=cfg.n_folds, shuffle=True, random_state=cfg.seed)
             oof_pred = np.full(len(frame), -1, dtype=int)
-            oof_prob = np.zeros((len(frame), len(CLASSES)), dtype=np.float32)
+            oof_logits = np.zeros((len(frame), len(CLASSES)), dtype=np.float32)
+            fold_rows = []
             for fold, (train_idx, val_idx) in enumerate(splitter.split(frame, y, groups)):
                 print(f"Fold {fold}: train={len(train_idx)} val={len(val_idx)}")
-                pred, prob, _ = train_one_fold(frame, train_idx, val_idx, cache_dir, epochs=epochs, input_name=input_name)
+                pred, logits, _ = train_one_fold(frame, train_idx, val_idx, cache_dir, epochs=epochs, input_name=input_name)
                 oof_pred[val_idx] = pred
-                oof_prob[val_idx] = prob
+                oof_logits[val_idx] = logits
                 fold_f1 = f1_score(y[val_idx], pred, average="macro")
+                fold_rows.append({"fold": fold, "macro_f1": fold_f1, "n": len(val_idx), "input": input_name})
                 print(f"Fold {fold} macro-F1={fold_f1:.4f}")
             report = classification_report(y, oof_pred, target_names=CLASSES, zero_division=0, output_dict=True)
             metrics = {
@@ -1072,11 +1144,14 @@ cells: list[dict] = [
                 "macro_precision": report["macro avg"]["precision"],
                 "macro_recall": report["macro avg"]["recall"],
             }
-            oof = frame[["path", "label", "label_id", "key", "group"]].copy()
+            oof_cols = [c for c in ["path", "label", "label_id", "key", "group", "group_source", "fold"] if c in frame.columns]
+            oof = frame[oof_cols].copy()
             oof["pred"] = oof_pred
+            oof_probs = torch.softmax(torch.tensor(oof_logits), dim=1).numpy()
             for i, cls in enumerate(CLASSES):
-                oof[f"prob_{cls}"] = oof_prob[:, i]
-            return metrics, oof
+                oof[f"logit_{cls}"] = oof_logits[:, i]
+                oof[f"prob_{cls}"] = oof_probs[:, i]
+            return metrics, oof, pd.DataFrame(fold_rows)
         """
     ),
     md(
@@ -1091,6 +1166,7 @@ cells: list[dict] = [
         cv_results = []
         oof_rgb = pd.DataFrame()
         oof_softmap = pd.DataFrame()
+        fold_metrics = pd.DataFrame()
 
         if cfg.run_training and len(df):
             if not RGB_CACHE.exists() or not SOFTMAP_CACHE.exists():
@@ -1098,11 +1174,13 @@ cells: list[dict] = [
                 RGB_CACHE = build_cache(df, "rgb")
                 SOFTMAP_CACHE = build_cache(df, "softmap")
             epochs = cfg.quick_epochs if cfg.run_quick_training else cfg.epochs
-            rgb_metrics, oof_rgb = run_group_cv(df, RGB_CACHE, input_name="RGB", epochs=epochs)
-            soft_metrics, oof_softmap = run_group_cv(df, SOFTMAP_CACHE, input_name="softmap", epochs=epochs)
+            rgb_metrics, oof_rgb, rgb_folds = run_group_cv(df, RGB_CACHE, input_name="RGB", epochs=epochs)
+            soft_metrics, oof_softmap, soft_folds = run_group_cv(df, SOFTMAP_CACHE, input_name="softmap", epochs=epochs)
             cv_results.extend([rgb_metrics, soft_metrics])
+            fold_metrics = pd.concat([rgb_folds, soft_folds], ignore_index=True)
             oof_rgb.to_csv(OUTPUT_DIR / "oof_rgb.csv", index=False)
             oof_softmap.to_csv(OUTPUT_DIR / "oof_softmap.csv", index=False)
+            fold_metrics.to_csv(OUTPUT_DIR / "cnn_fold_metrics.csv", index=False)
         else:
             print("Training skipped. Set cfg.run_training=True to train TinyResNet.")
         """
@@ -1111,37 +1189,58 @@ cells: list[dict] = [
         """
         ## 12. Stage 1 Calibration
 
-        Post-hoc calibration is applied to OOF probabilities.
+        Post-hoc calibration is applied to OOF logits, matching the upstream
+        Stage1 logit-bias sweep.
         """
     ),
     code(
         """
-        def calibrate_stage1(oof, stage1_delta=-0.10):
+        def sweep_stage1_bias(oof, lo=-3.0, hi=1.0, steps=81):
             if oof is None or len(oof) == 0:
                 return pd.DataFrame(), None
-            prob_cols = [f"prob_{cls}" for cls in CLASSES]
-            probs = oof[prob_cols].values.copy()
+            logit_cols = [f"logit_{cls}" for cls in CLASSES]
+            missing = [col for col in logit_cols if col not in oof.columns]
+            if missing:
+                print("Calibration skipped; missing OOF logit columns:", missing)
+                return pd.DataFrame(), None
+            logits = oof[logit_cols].values.astype(np.float32)
+            y = oof["label_id"].values.astype(int)
             stage1_idx = CLASS2ID["Stage1"]
-            probs[:, stage1_idx] = np.clip(probs[:, stage1_idx] + stage1_delta, 0, None)
-            probs = probs / np.maximum(probs.sum(axis=1, keepdims=True), 1e-8)
+            base_pred = logits.argmax(axis=1)
+            base_f1 = f1_score(y, base_pred, average="macro")
+            best_bias, best_f1, best_pred = 0.0, base_f1, base_pred
+            for bias in np.linspace(lo, hi, steps):
+                adjusted = logits.copy()
+                adjusted[:, stage1_idx] += float(bias)
+                pred = adjusted.argmax(axis=1)
+                metric = f1_score(y, pred, average="macro")
+                if metric > best_f1:
+                    best_bias, best_f1, best_pred = float(bias), float(metric), pred
             out = oof.copy()
-            out["pred_calibrated"] = probs.argmax(axis=1)
-            metric = f1_score(out["label_id"], out["pred_calibrated"], average="macro")
-            return out, {"scenario": "CNN + kalibrasi Stage1", "input": "Softmap", "macro_f1": metric, "note": f"delta={stage1_delta}"}
+            out["pred_calibrated"] = best_pred
+            return out, {
+                "scenario": "CNN + kalibrasi Stage1",
+                "input": "Softmap",
+                "macro_f1": best_f1,
+                "base_macro_f1": base_f1,
+                "note": f"logit_bias={best_bias:+.2f}",
+                "stage1_logit_bias": best_bias,
+            }
 
-        oof_softmap_calibrated, calibration_result = calibrate_stage1(oof_softmap)
+        oof_softmap_calibrated, calibration_result = sweep_stage1_bias(oof_softmap)
         if calibration_result:
             print(calibration_result)
             oof_softmap_calibrated.to_csv(OUTPUT_DIR / "oof_softmap_calibrated.csv", index=False)
         else:
-            print("Calibration skipped because OOF softmap probabilities are unavailable.")
+            print("Calibration skipped because OOF softmap logits are unavailable.")
         """
     ),
     md(
         """
         ## 13. Final Results
 
-        The report table has four scenarios only.
+        Final metrics are produced only from this notebook run. Reference values
+        are saved separately as comparison targets, not as generated results.
         """
     ),
     code(
@@ -1156,14 +1255,44 @@ cells: list[dict] = [
 
         if rows:
             final_results = pd.DataFrame(rows)
-        elif cfg.use_known_report_results_when_not_run:
-            final_results = REPORT_RESULTS.copy()
-            final_results["source"] = "report_locked"
         else:
-            final_results = pd.DataFrame(columns=REPORT_RESULTS.columns)
+            final_results = pd.DataFrame(columns=["scenario", "input", "macro_f1", "note"])
+            print("No experiments were run, so final_metrics.csv is intentionally empty.")
 
         final_results.to_csv(OUTPUT_DIR / "final_metrics.csv", index=False)
+        REFERENCE_RESULTS.to_csv(OUTPUT_DIR / "reference_targets.csv", index=False)
+        print("Reference targets for comparison:")
+        display(REFERENCE_RESULTS)
+        print("Current-run final metrics:")
         display(final_results)
+
+        if len(final_results):
+            compare_rows = []
+            for _, ref in REFERENCE_RESULTS.iterrows():
+                if "Classical" in ref["scenario"]:
+                    current = final_results[final_results["scenario"].astype(str).str.contains("Baseline klasik", case=False, na=False)]
+                elif "Stage1 logit bias" in ref["scenario"]:
+                    current = final_results[final_results["scenario"].astype(str).str.contains("kalibrasi", case=False, na=False)]
+                elif ref["scenario"] == "CNN softmap":
+                    current = final_results[
+                        final_results["scenario"].astype(str).str.contains("softmap", case=False, na=False)
+                        & ~final_results["scenario"].astype(str).str.contains("kalibrasi", case=False, na=False)
+                    ]
+                elif ref["scenario"] == "CNN RGB":
+                    current = final_results[final_results["scenario"].astype(str).str.contains("RGB", case=False, na=False)]
+                else:
+                    current = final_results[final_results["input"].astype(str).str.lower() == str(ref["input"]).lower()]
+                if len(current):
+                    got = float(current.iloc[-1]["macro_f1"])
+                    compare_rows.append({
+                        "reference_scenario": ref["scenario"],
+                        "reference_macro_f1": float(ref["macro_f1"]),
+                        "current_macro_f1": got,
+                        "delta": got - float(ref["macro_f1"]),
+                    })
+            comparison = pd.DataFrame(compare_rows)
+            comparison.to_csv(OUTPUT_DIR / "reference_comparison.csv", index=False)
+            display(comparison)
         """
     ),
     md(
@@ -1465,12 +1594,8 @@ cells: list[dict] = [
             rows = []
             if len(vessel_seg_metrics):
                 rows.append({"target": "Vessel", "dice": float(vessel_seg_metrics["dice"].mean())})
-            else:
-                rows.append({"target": "Vessel", "dice": REPORT_VESSEL_DICE})
             if len(ridge_seg_metrics):
                 rows.append({"target": "Ridge", "dice": float(ridge_seg_metrics["dice"].mean())})
-            else:
-                rows.append({"target": "Ridge", "dice": REPORT_RIDGE_DICE})
             if not rows:
                 print("Skipped segmentation_metrics: no metrics.")
                 return
