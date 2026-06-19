@@ -24,11 +24,26 @@ neovaskularisasi. Representasi inilah yang kemudian dibandingkan secara langsung
 mentah pada eksperimen klasifikasi.
 
 Pada evaluasi pendukung segmentasi struktural, kanal pembuluh darah mencapai nilai Dice
-\textbf{0,4739} pada dataset HVDROPDB-BV. Kanal \textit{ridge} dievaluasi dengan protokol yang
-sama terhadap HVDROPDB-RIDGE untuk memeriksa kesesuaian peta \textit{ridge} dengan anotasi
-garis batas dan tonjolan retina. Evaluasi ini berperan sebagai validasi spasial pendukung,
-sementara eksperimen utama penelitian tetap berfokus pada dampak representasi \textit{softmap}
-terhadap performa klasifikasi \textit{stage} ROP.
+\textbf{0,3881} pada dataset HVDROPDB-BV. Kanal \textit{ridge} mencapai nilai Dice
+\textbf{0,0993} pada HVDROPDB-RIDGE ketika dievaluasi dengan protokol yang sama untuk memeriksa
+kesesuaian peta \textit{ridge} dengan anotasi garis batas dan tonjolan retina. Evaluasi ini
+berperan sebagai validasi spasial pendukung, sementara eksperimen utama penelitian tetap
+berfokus pada dampak representasi \textit{softmap} terhadap performa klasifikasi \textit{stage}
+ROP.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.7\linewidth]{images/segmentation_metrics}
+  \caption{Ringkasan Dice pendukung untuk kanal pembuluh darah dan kanal \textit{ridge}}
+  \label{fig:segmentation_metrics}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{images/segmentation_examples}
+  \caption{Contoh visual evaluasi pendukung segmentasi struktural pada anotasi Agrawal2021}
+  \label{fig:segmentation_examples}
+\end{figure}
 
 %--------------------------------------------------------------
 \section{Hasil Baseline Klasik}

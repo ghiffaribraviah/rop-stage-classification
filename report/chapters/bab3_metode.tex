@@ -53,6 +53,13 @@ disimpan dalam berkas \textit{clean\_manifest.json}.
 
 Validasi silang 5-\textit{fold} menggunakan \textit{StratifiedGroupKFold}---varian validasi silang yang menjamin distribusi kelas tetap merata di setiap \textit{fold} sekaligus memastikan seluruh anggota satu kelompok tidak terbagi antara himpunan pelatihan dan pengujian---diterapkan agar setiap kelompok selalu berada sepenuhnya di satu sisi batas pelatihan--pengujian. Strategi ini memastikan bahwa model benar-benar mempelajari pola penyakit, bukan pola citra dari mata tertentu.
 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{images/group_fold_distribution}
+  \caption{Distribusi kelas pada setiap \textit{fold} setelah pembagian \textit{group-aware}}
+  \label{fig:group_fold_distribution}
+\end{figure}
+
 %--------------------------------------------------------------
 \section{Pembuatan Representasi Softmap Spasial}
 %--------------------------------------------------------------
@@ -83,6 +90,13 @@ $0^\circ$ hingga $165^\circ$ dengan langkah $15^\circ$. Respons maksimum dari se
 digunakan sebagai peta pembuluh darah awal, kemudian diperhalus dengan median blur $7 \times
 7$, diberi CLAHE kedua, dan dinormalisasi kembali ke rentang $[0, 1]$.
 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{images/vessel_preprocessing_steps}
+  \caption{Tahapan pembentukan \textit{softmap} pembuluh darah berbasis plain Gabor}
+  \label{fig:vessel_preprocessing_steps}
+\end{figure}
+
 \subsection{Softmap Ridge Berbasis Meijering dan Oriented Top-Hat}
 
 Kanal \textit{ridge} dirancang untuk memperkuat struktur garis batas, tonjolan, dan area tepi
@@ -96,6 +110,13 @@ orientasi. Kedua respons digabungkan sebagai:
   + 0{,}40 \times \text{oriented\_tophat}\right).
   \label{eq:ridge_softmap}
 \end{equation}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{images/ridge_preprocessing_steps}
+  \caption{Tahapan pembentukan \textit{softmap ridge} berbasis Meijering dan \textit{oriented top-hat}}
+  \label{fig:ridge_preprocessing_steps}
+\end{figure}
 
 \subsection{Komposit Softmap Tiga Kanal}
 

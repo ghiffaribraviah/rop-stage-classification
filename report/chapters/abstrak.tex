@@ -34,7 +34,8 @@ berbasis Gabor, \textit{softmap} area tepi berbasis Meijering dan \textit{orient
 kanal hijau ternormalisasi CLAHE. Validasi silang 5-\textit{fold} yang
 mempertimbangkan kelompok citra serupa (\textit{group-aware cross-validation}) menghasilkan
 \textit{macro F1-score} sebesar \textbf{0,7853}. Sebagai evaluasi pendukung, alur segmentasi
-pembuluh darah mencapai nilai Dice \textbf{0,4739} pada dataset HVDROPDB-BV. Percobaan ablasi yang terkontrol menunjukkan bahwa
+pembuluh darah mencapai nilai Dice \textbf{0,3881} pada dataset HVDROPDB-BV, sedangkan kanal
+\textit{ridge} mencapai Dice \textbf{0,0993} pada HVDROPDB-RIDGE. Percobaan ablasi yang terkontrol menunjukkan bahwa
 representasi \textit{softmap} memberikan peningkatan 0,0987 dibanding masukan RGB mentah
 (0,6866 vs 0,7853) pada model, data, dan protokol yang sama. Hasil ini membuktikan bahwa
 representasi spasial dari informasi pembuluh darah---bukan hanya nilai piksel mentah---merupakan
@@ -74,8 +75,8 @@ classification model is a custom residual CNN (TinyResNet) trained from scratch 
 pretrained weights, receiving a three-channel input consisting of a Gabor-based vessel softmap,
 a Meijering and oriented top-hat ridge softmap, and a CLAHE-normalized green channel. Group-aware
 5-fold cross-validation yields a macro F1-score of \textbf{0.7853}. As a supporting evaluation,
-the vessel segmentation workflow achieves a Dice score of \textbf{0.4739} on the HVDROPDB-BV
-dataset. A controlled ablation experiment
+the vessel segmentation workflow achieves a Dice score of \textbf{0.3881} on the HVDROPDB-BV
+dataset, while the ridge channel reaches \textbf{0.0993} on HVDROPDB-RIDGE. A controlled ablation experiment
 demonstrates that the softmap representation provides a +0.0987 improvement over raw RGB input
 (0.6866 vs. 0.7853) under identical model, data, and protocol settings. These results confirm
 that spatial vessel evidence---rather than raw pixel values---is the key driver of classification

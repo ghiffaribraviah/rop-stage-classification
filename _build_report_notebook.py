@@ -177,7 +177,8 @@ cells: list[dict] = [
             {"scenario": "CNN softmap (group-aware)", "input": "Softmap", "macro_f1": 0.7853, "note": "OOF 5-fold"},
             {"scenario": "CNN + kalibrasi Stage1", "input": "Softmap", "macro_f1": 0.8018, "note": "Post-hoc"},
         ])
-        REPORT_VESSEL_DICE = 0.4739
+        REPORT_VESSEL_DICE = 0.3881
+        REPORT_RIDGE_DICE = 0.0993
 
         def seed_everything(seed=42):
             random.seed(seed)
@@ -1165,6 +1166,391 @@ cells: list[dict] = [
         display(final_results)
         """
     ),
+    md(
+        """
+        ## 14. Report Figure Regeneration
+
+        This section regenerates figures used by the LaTeX report and mirrors them
+        into `figures/report/` for notebook review.
+        """
+    ),
+    code(
+        """
+        REPORT_FIG_DIR = Path("report/images")
+        NOTEBOOK_REPORT_FIG_DIR = FIG_DIR / "report"
+        REPORT_FIG_DIR.mkdir(parents=True, exist_ok=True)
+        NOTEBOOK_REPORT_FIG_DIR.mkdir(parents=True, exist_ok=True)
+        SHOW_REPORT_FIGURES = False
+
+        def save_report_fig(filename, dpi=220):
+            plt.tight_layout()
+            for out_dir in [REPORT_FIG_DIR, NOTEBOOK_REPORT_FIG_DIR]:
+                out_dir.mkdir(parents=True, exist_ok=True)
+                plt.savefig(out_dir / filename, dpi=dpi, bbox_inches="tight")
+            if SHOW_REPORT_FIGURES:
+                plt.show()
+            plt.close()
+
+        def choose_sample(frame, label=None, fallback_label="Stage2"):
+            if frame is None or len(frame) == 0:
+                return None
+            if label is not None and len(frame[frame["label"] == label]):
+                return frame[frame["label"] == label].sample(1, random_state=cfg.seed).iloc[0]
+            if len(frame[frame["label"] == fallback_label]):
+                return frame[frame["label"] == fallback_label].sample(1, random_state=cfg.seed).iloc[0]
+            return frame.sample(1, random_state=cfg.seed).iloc[0]
+
+        def plot_image_grid(panels, filename, ncols=None, figsize=None, dpi=220):
+            n = len(panels)
+            ncols = ncols or n
+            nrows = int(np.ceil(n / ncols))
+            figsize = figsize or (3.0 * ncols, 3.0 * nrows)
+            fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+            axes = np.atleast_1d(axes).ravel()
+            for ax, panel in zip(axes, panels):
+                title, image, cmap = panel
+                ax.imshow(image, cmap=cmap)
+                ax.set_title(title, fontsize=9)
+                ax.axis("off")
+            for ax in axes[len(panels):]:
+                ax.axis("off")
+            plt.tight_layout()
+            save_report_fig(filename, dpi=dpi)
+        """
+    ),
+    code(
+        """
+        def report_class_distribution():
+            if len(df) == 0:
+                print("Skipped class_distribution: no dataframe.")
+                return
+            counts = df["label"].value_counts().reindex(CLASSES).fillna(0).astype(int)
+            plt.figure(figsize=(7, 4))
+            ax = sns.barplot(x=counts.index, y=counts.values, palette="Set2")
+            ax.set_title("Distribusi kelas Zhao2024")
+            ax.set_xlabel("")
+            ax.set_ylabel("Jumlah citra")
+            for container in ax.containers:
+                ax.bar_label(container, padding=3)
+            save_report_fig("class_distribution.png")
+
+        def report_dataset_samples():
+            sample_rows = []
+            for label in CLASSES:
+                row = choose_sample(df, label=label)
+                if row is not None:
+                    sample_rows.append(row)
+            panels = []
+            for row in sample_rows:
+                try:
+                    panels.append((row["label"], read_rgb(row["path"]), None))
+                except Exception as exc:
+                    canvas = np.ones((256, 256, 3), dtype=np.uint8) * 255
+                    panels.append((f"{row['label']}\\n{exc}", canvas, None))
+            if panels:
+                plot_image_grid(panels, "dataset_samples.png", ncols=len(panels), figsize=(3 * len(panels), 3))
+
+        def report_group_fold_distribution():
+            if len(df) == 0 or "fold" not in df:
+                print("Skipped group_fold_distribution: no fold assignment.")
+                return
+            table = pd.crosstab(df["fold"], df["label"]).reindex(columns=CLASSES).fillna(0)
+            plt.figure(figsize=(8, 4.5))
+            sns.heatmap(table, annot=True, fmt=".0f", cmap="YlGnBu", cbar=False)
+            plt.title("Distribusi kelas per fold group-aware")
+            plt.xlabel("Kelas")
+            plt.ylabel("Fold")
+            save_report_fig("group_fold_distribution.png")
+
+        report_class_distribution()
+        report_dataset_samples()
+        report_group_fold_distribution()
+        """
+    ),
+    code(
+        """
+        def draw_flow_diagram(nodes, filename, title=None, figsize=(12, 2.8)):
+            fig, ax = plt.subplots(figsize=figsize)
+            ax.set_xlim(0, len(nodes))
+            ax.set_ylim(0, 1)
+            ax.axis("off")
+            if title:
+                ax.set_title(title, fontsize=12, pad=12)
+            for i, node in enumerate(nodes):
+                x = i + 0.5
+                box = plt.Rectangle((x - 0.38, 0.35), 0.76, 0.30, fill=True,
+                                    facecolor="#E8F1F2", edgecolor="#2F3E46", linewidth=1.2)
+                ax.add_patch(box)
+                ax.text(x, 0.50, node, ha="center", va="center", fontsize=9)
+                if i < len(nodes) - 1:
+                    ax.annotate("", xy=(i + 1.12, 0.50), xytext=(i + 0.88, 0.50),
+                                arrowprops=dict(arrowstyle="->", lw=1.4, color="#2F3E46"))
+            save_report_fig(filename, dpi=220)
+
+        def report_pipeline_diagram():
+            draw_flow_diagram(
+                ["Zhao2024", "RGB / Softmap", "TinyResNet", "OOF CV", "Macro F1"],
+                "pipeline_diagram.png",
+                "Alur eksperimen klasifikasi",
+            )
+
+        def report_tinyresnet_arch():
+            draw_flow_diagram(
+                ["Input 3x224x224", "Stem Conv", "ResBlock x2", "ResBlock x2", "ResBlock x2", "GAP", "FC 5 kelas"],
+                "tinyresnet_arch.png",
+                "TinyResNet",
+                figsize=(13.5, 2.8),
+            )
+
+        def report_rop_stages_diagram():
+            nodes = ["Normal", "Stage 1\\nDemarcation line", "Stage 2\\nRidge", "Stage 3\\nNeovascular", "Laser scars"]
+            draw_flow_diagram(nodes, "rop_stages_diagram.png", "Kategori citra ROP", figsize=(12.5, 2.8))
+
+        report_pipeline_diagram()
+        report_tinyresnet_arch()
+        report_rop_stages_diagram()
+        """
+    ),
+    code(
+        """
+        def vessel_debug_maps_from_rgb(rgb):
+            work = resize_max_side(rgb, cfg.process_side)
+            fov = estimate_fov_mask(work)
+            green = work[:, :, 1].copy()
+            green_masked = green.copy()
+            green_masked[~fov] = 0
+            clahe = cv2.createCLAHE(clipLimit=6.0, tileGridSize=(16, 16)).apply(green_masked)
+            clahe[~fov] = 0
+            inverted = 255 - clahe
+            inverted_float = norm01(inverted.astype(np.float32), fov)
+            gabor = gabor_response(inverted_float, fov)
+            smoothed = cv2.medianBlur(np.clip(gabor * 255, 0, 255).astype(np.uint8), 7)
+            smoothed[~fov] = 0
+            smoothed_norm = norm01(smoothed.astype(np.float32), fov)
+            final_u8 = cv2.createCLAHE(clipLimit=12.0, tileGridSize=(12, 12)).apply(
+                np.clip(smoothed_norm * 255, 0, 255).astype(np.uint8)
+            )
+            final_u8[~fov] = 0
+            vessel = norm01(final_u8.astype(np.float32), fov)
+            binary = binary_from_response(vessel, fov, density=0.16)
+            return {
+                "rgb": work, "fov": fov, "green": green_masked, "clahe": clahe,
+                "inverted": inverted_float, "gabor": gabor, "smoothed": smoothed_norm,
+                "vessel": vessel, "binary": binary,
+            }
+
+        def ridge_debug_maps_from_rgb(rgb):
+            work = resize_max_side(rgb, cfg.process_side)
+            fov = estimate_fov_mask(work)
+            green = work[:, :, 1].copy()
+            green_masked = green.copy()
+            green_masked[~fov] = 0
+            clahe = clahe_green(work, fov, clip=4.0, tile=(16, 16))
+            meij = hessian_ridge(clahe, fov)
+            top = oriented_tophat(clahe, fov)
+            ridge = norm01((0.60 * meij + 0.40 * top).astype(np.float32), fov)
+            binary = binary_from_response(ridge, fov, density=0.16)
+            return {
+                "rgb": work, "fov": fov, "green": green_masked, "clahe": clahe,
+                "meijering": meij, "tophat": top, "ridge": ridge, "binary": binary,
+            }
+
+        def first_agrawal_pair(task):
+            pairs = agrawal_pairs(AGRAWAL_ROOT, task)
+            return pairs[0] if pairs else None
+        """
+    ),
+    code(
+        """
+        def report_vessel_preprocessing_steps():
+            pair = first_agrawal_pair("vessel")
+            if pair:
+                rgb = read_rgb(pair["image_path"])
+                maps = vessel_debug_maps_from_rgb(rgb)
+                gt = read_binary_mask(pair["mask_path"], maps["fov"].shape) & maps["fov"]
+            else:
+                row = choose_sample(df, fallback_label="Stage2")
+                if row is None:
+                    print("Skipped vessel_preprocessing_steps: no sample.")
+                    return
+                maps = vessel_debug_maps_from_rgb(read_rgb(row["path"]))
+                gt = None
+            panels = [
+                ("Raw RGB", maps["rgb"], None),
+                ("FOV", maps["fov"], "gray"),
+                ("Green", maps["green"], "gray"),
+                ("CLAHE green", maps["clahe"], "gray"),
+                ("Inverted", maps["inverted"], "gray"),
+                ("Gabor response", maps["gabor"], "magma"),
+                ("Smoothed", maps["smoothed"], "magma"),
+                ("Vessel softmap", maps["vessel"], "magma"),
+                ("Binary mask", maps["binary"], "gray"),
+            ]
+            if gt is not None:
+                panels.append(("GT vessel", gt, "gray"))
+            plot_image_grid(panels, "vessel_preprocessing_steps.png", ncols=5, figsize=(14, 5.8))
+
+        def report_ridge_preprocessing_steps():
+            pair = first_agrawal_pair("ridge")
+            if pair:
+                rgb = read_rgb(pair["image_path"])
+                maps = ridge_debug_maps_from_rgb(rgb)
+                gt = read_binary_mask(pair["mask_path"], maps["fov"].shape) & maps["fov"]
+            else:
+                row = choose_sample(df, fallback_label="Stage2")
+                if row is None:
+                    print("Skipped ridge_preprocessing_steps: no sample.")
+                    return
+                maps = ridge_debug_maps_from_rgb(read_rgb(row["path"]))
+                gt = None
+            panels = [
+                ("Raw RGB", maps["rgb"], None),
+                ("FOV", maps["fov"], "gray"),
+                ("Green", maps["green"], "gray"),
+                ("CLAHE green", maps["clahe"], "gray"),
+                ("Meijering", maps["meijering"], "magma"),
+                ("Oriented top-hat", maps["tophat"], "magma"),
+                ("Ridge softmap", maps["ridge"], "magma"),
+                ("Binary mask", maps["binary"], "gray"),
+            ]
+            if gt is not None:
+                panels.append(("GT ridge", gt, "gray"))
+            plot_image_grid(panels, "ridge_preprocessing_steps.png", ncols=3, figsize=(10.5, 8.4))
+
+        def report_input_channels():
+            row = choose_sample(df, fallback_label="Stage2")
+            if row is None:
+                print("Skipped input_scenarios_comparison: no sample.")
+                return
+            maps = build_debug_maps(row["path"])
+            panels = [
+                ("Raw RGB", maps["rgb"], None),
+                ("Plain-Gabor vessel", maps["vessel"], "magma"),
+                ("CLAHE green", maps["green"], "gray"),
+                ("Ridge softmap", maps["ridge"], "magma"),
+                ("X softmap", maps["softmap"], None),
+            ]
+            plot_image_grid(panels, "input_scenarios_comparison.png", ncols=5, figsize=(14, 3.2))
+
+        report_vessel_preprocessing_steps()
+        report_ridge_preprocessing_steps()
+        report_input_channels()
+        """
+    ),
+    code(
+        """
+        def report_segmentation_examples():
+            panels = []
+            for task in ["vessel", "ridge"]:
+                pair = first_agrawal_pair(task)
+                if not pair:
+                    continue
+                rgb = resize_max_side(read_rgb(pair["image_path"]), cfg.process_side)
+                fov = estimate_fov_mask(rgb)
+                gt = read_binary_mask(pair["mask_path"], fov.shape) & fov
+                resp = plain_gabor_vessel_softmap(rgb, fov) if task == "vessel" else ridge_softmap(rgb, fov)
+                pred = binary_from_response(resp, fov, density=0.16)
+                panels.extend([
+                    (f"{task}: RGB", rgb, None),
+                    (f"{task}: softmap", resp, "magma"),
+                    (f"{task}: pred", pred, "gray"),
+                    (f"{task}: GT", gt, "gray"),
+                ])
+            if panels:
+                plot_image_grid(panels, "segmentation_examples.png", ncols=4, figsize=(12, 6))
+            else:
+                print("Skipped segmentation_examples: no Agrawal pairs.")
+
+        def report_segmentation_metrics():
+            rows = []
+            if len(vessel_seg_metrics):
+                rows.append({"target": "Vessel", "dice": float(vessel_seg_metrics["dice"].mean())})
+            else:
+                rows.append({"target": "Vessel", "dice": REPORT_VESSEL_DICE})
+            if len(ridge_seg_metrics):
+                rows.append({"target": "Ridge", "dice": float(ridge_seg_metrics["dice"].mean())})
+            else:
+                rows.append({"target": "Ridge", "dice": REPORT_RIDGE_DICE})
+            if not rows:
+                print("Skipped segmentation_metrics: no metrics.")
+                return
+            mdf = pd.DataFrame(rows)
+            plt.figure(figsize=(5.5, 3.6))
+            ax = sns.barplot(data=mdf, x="target", y="dice", palette="Set2")
+            ax.set_ylim(0, max(0.7, float(mdf["dice"].max()) + 0.1))
+            ax.set_xlabel("")
+            ax.set_ylabel("Dice")
+            ax.set_title("Evaluasi segmentasi struktural")
+            for container in ax.containers:
+                ax.bar_label(container, fmt="%.4f", padding=3)
+            save_report_fig("segmentation_metrics.png")
+
+        report_segmentation_examples()
+        report_segmentation_metrics()
+        """
+    ),
+    code(
+        """
+        def report_result_comparison():
+            if len(final_results) == 0:
+                print("Skipped results_comparison_chart: no metrics.")
+                return
+            plt.figure(figsize=(8, 4.5))
+            ax = sns.barplot(data=final_results, x="macro_f1", y="scenario", palette="Set2")
+            ax.set_xlim(0, 1)
+            ax.set_xlabel("Macro F1")
+            ax.set_ylabel("")
+            ax.set_title("Perbandingan hasil klasifikasi")
+            for container in ax.containers:
+                ax.bar_label(container, fmt="%.4f", padding=3)
+            save_report_fig("results_comparison_chart.png")
+
+        def report_confusion_matrix():
+            source = oof_softmap
+            pred_col = "pred"
+            if (source is None or len(source) == 0) and (OUTPUT_DIR / "oof_softmap.csv").exists():
+                source = pd.read_csv(OUTPUT_DIR / "oof_softmap.csv")
+            if source is None or len(source) == 0 or pred_col not in source:
+                print("Skipped confusion_matrix_champion: requires OOF predictions.")
+                return
+            cm = confusion_matrix(source["label_id"], source[pred_col], labels=list(range(len(CLASSES))))
+            fig, ax = plt.subplots(figsize=(6, 5))
+            ConfusionMatrixDisplay(cm, display_labels=CLASSES).plot(ax=ax, cmap="Blues", colorbar=False)
+            ax.set_title("Matriks konfusi TinyResNet softmap")
+            save_report_fig("confusion_matrix_champion.png")
+
+        def report_prediction_examples():
+            source = oof_softmap
+            if (source is None or len(source) == 0) and (OUTPUT_DIR / "oof_softmap.csv").exists():
+                source = pd.read_csv(OUTPUT_DIR / "oof_softmap.csv")
+            if source is None or len(source) == 0 or "pred" not in source:
+                print("Skipped prediction_examples: requires OOF predictions.")
+                return
+            chosen = []
+            correct = source[source["label_id"] == source["pred"]]
+            wrong = source[source["label_id"] != source["pred"]]
+            for label in ["Normal", "Stage3"]:
+                sub = correct[correct["label"] == label]
+                if len(sub):
+                    chosen.append(sub.sample(1, random_state=cfg.seed).iloc[0])
+            for true_label, pred_label in [("Stage2", "Stage1"), ("Stage1", "Normal")]:
+                sub = wrong[(wrong["label"] == true_label) & (wrong["pred"] == CLASS2ID[pred_label])]
+                if len(sub):
+                    chosen.append(sub.sample(1, random_state=cfg.seed).iloc[0])
+            if not chosen:
+                print("Skipped prediction_examples: no matching cases.")
+                return
+            panels = []
+            for row in chosen:
+                pred_name = CLASSES[int(row["pred"])]
+                panels.append((f"T:{row['label']} / P:{pred_name}", read_rgb(row["path"]), None))
+            plot_image_grid(panels, "prediction_examples.png", ncols=len(panels), figsize=(3.2 * len(panels), 3.4))
+
+        report_result_comparison()
+        report_confusion_matrix()
+        report_prediction_examples()
+        """
+    ),
     code(
         """
         if len(final_results):
@@ -1197,7 +1583,7 @@ cells: list[dict] = [
     ),
     md(
         """
-        ## 14. Export Summary
+        ## 15. Export Summary
 
         The notebook writes figures and CSV outputs for the report.
         """
